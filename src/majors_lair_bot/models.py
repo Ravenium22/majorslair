@@ -89,6 +89,7 @@ class PageResult:
 @dataclass(slots=True)
 class ScanSummary:
     period_label: str
+    scan_id: str = ""
     source_posts: int = 0
     discovered: int = 0
     replies: int = 0

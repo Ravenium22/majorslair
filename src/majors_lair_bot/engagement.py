@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import asdict
 from datetime import datetime
 from typing import Any
 
+from .database import DatabaseRepository
 from .models import (
     ActionType,
     EngagementAction,
@@ -14,7 +16,6 @@ from .models import (
     Tweet,
 )
 from .scoring import DEFAULT_CONFIG, ScoringEngine, ScoringRules, content_fingerprint
-from .sheets import GoogleSheetRepository
 from .twitter_client import (
     TwitterApiClient,
     TwitterApiError,
@@ -34,7 +35,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 class EngagementService:
-    def __init__(self, repository: GoogleSheetRepository, twitter: TwitterApiClient) -> None:
+    def __init__(self, repository: DatabaseRepository, twitter: TwitterApiClient) -> None:
         self.repository = repository
         self.twitter = twitter
         self._scan_lock = asyncio.Lock()
@@ -469,7 +470,32 @@ class EngagementService:
                 seen_mentions.add(tweet.tweet_id)
         return actions, scopes
 
-    async def scan(self, *, period: str, actor_discord_id: str) -> ScanSummary:
+    async def scan(
+        self,
+        *,
+        period: str,
+        actor_discord_id: str,
+        source: str = "discord",
+        scan_id: str | None = None,
+    ) -> ScanSummary:
+        parse_period(period)
+        run_id = scan_id or await self.repository.create_scan_run(
+            period=period, triggered_by=actor_discord_id, source=source
+        )
+        try:
+            summary = await self._scan_impl(
+                period=period, actor_discord_id=actor_discord_id
+            )
+            summary.scan_id = run_id
+            await self.repository.finish_scan_run(run_id, summary=asdict(summary))
+            return summary
+        except Exception as exc:
+            await self.repository.finish_scan_run(run_id, error=str(exc))
+            raise
+
+    async def _scan_impl(
+        self, *, period: str, actor_discord_id: str
+    ) -> ScanSummary:
         duration, period_label = parse_period(period)
         async with self._scan_lock:
             config = await self.repository.get_config()

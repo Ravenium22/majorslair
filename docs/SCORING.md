@@ -1,7 +1,7 @@
 # Community scoring rules
 
-This is the default public scoring policy. The live source of truth is the Google Sheet `Config` tab;
-admins can edit the values and run `/sync-sheet` to recalculate the current cycle.
+This is the default public scoring policy. The live source of truth is the admin site's
+**Scoring rules** page; saving changes validates the rules and recalculates the current cycle.
 
 ## Base points
 

@@ -7,10 +7,10 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from .database import DatabaseRepository, LinkConflictError
 from .engagement import EngagementService
 from .scoring import DEFAULT_CONFIG
 from .settings import Settings
-from .sheets import GoogleSheetRepository, LinkConflictError
 from .twitter_client import TwitterApiClient, TwitterApiError
 
 LOGGER = logging.getLogger(__name__)
@@ -315,7 +315,7 @@ class EngagementCog(commands.Cog):
         name="low-activity-report",
         description="List linked members at or below the score threshold",
     )
-    @app_commands.describe(threshold="Optional point threshold; defaults to the Config sheet")
+    @app_commands.describe(threshold="Optional point threshold; defaults to admin configuration")
     @app_commands.guild_only()
     @admin_only()
     async def low_activity_report(
@@ -370,24 +370,24 @@ class EngagementCog(commands.Cog):
         )
 
     @app_commands.command(
-        name="sync-sheet", description="Ensure Sheet tabs/columns and recalculate current scores"
+        name="sync-database", description="Ensure database tables and recalculate current scores"
     )
     @app_commands.guild_only()
     @admin_only()
-    async def sync_sheet(self, interaction: discord.Interaction) -> None:
+    async def sync_database(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True, thinking=True)
         await self.bot.repository.ensure_schema()
         count = await self.bot.service.rescore_current_cycle()
         await self.bot.repository.append_audit(
-            event_type="sheet_synced",
+            event_type="database_synced",
             actor_discord_id=str(interaction.user.id),
             details={"rescored_actions": count},
         )
         await interaction.followup.send(
-            f"Sheet schema is current; recalculated {count} action rows.", ephemeral=True
+            f"Database schema is current; recalculated {count} action rows.", ephemeral=True
         )
         await self.bot.audit(
-            "Sheet synchronized", f"<@{interaction.user.id}> synchronized schema and scores."
+            "Database synchronized", f"<@{interaction.user.id}> synchronized schema and scores."
         )
 
 
@@ -398,7 +398,7 @@ class EngagementBot(commands.Bot):
         self,
         *,
         settings: Settings,
-        repository: GoogleSheetRepository,
+        repository: DatabaseRepository,
         twitter: TwitterApiClient,
     ) -> None:
         intents = discord.Intents.default()

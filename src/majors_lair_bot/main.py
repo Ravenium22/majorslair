@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import logging
 
-from .discord_app import EngagementBot
+import uvicorn
+
 from .settings import Settings, SettingsError
-from .sheets import GoogleSheetRepository
-from .twitter_client import TwitterApiClient
+from .web import create_app
 
 
 def main() -> None:
@@ -17,14 +17,14 @@ def main() -> None:
         level=getattr(logging, settings.log_level, logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    repository = GoogleSheetRepository(
-        sheet_id=settings.google_sheet_id,
-        credentials_file=settings.google_service_account_file,
-        credentials_info=settings.google_service_account_info,
+    uvicorn.run(
+        create_app(settings),
+        host="0.0.0.0",
+        port=settings.port,
+        log_level=settings.log_level.lower(),
+        proxy_headers=True,
+        forwarded_allow_ips="*",
     )
-    twitter = TwitterApiClient(settings.twitter_api_key)
-    bot = EngagementBot(settings=settings, repository=repository, twitter=twitter)
-    bot.run(settings.discord_token, log_handler=None)
 
 
 if __name__ == "__main__":

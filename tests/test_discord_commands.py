@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
 from majors_lair_bot.discord_app import EngagementBot, EngagementCog
 from majors_lair_bot.settings import Settings
-from majors_lair_bot.sheets import GoogleSheetRepository
 from majors_lair_bot.twitter_client import TwitterApiClient
 
 
@@ -14,18 +13,23 @@ from majors_lair_bot.twitter_client import TwitterApiClient
 async def test_all_specified_slash_commands_register() -> None:
     settings = Settings(
         discord_token="unused",
-        discord_guild_id=None,
+        discord_guild_id=123,
         discord_audit_channel_id=None,
         admin_role_ids=frozenset(),
+        discord_client_id="client",
+        discord_client_secret="secret",
+        discord_oauth_redirect_uri="http://localhost:8000/auth/callback",
         twitter_api_key="unused",
-        google_sheet_id="unused",
-        google_service_account_file=Path("unused.json"),
-        google_service_account_info=None,
+        database_url="sqlite+aiosqlite:///:memory:",
+        app_base_url="http://localhost:8000",
+        admin_session_ttl_hours=12,
+        session_cookie_secure=False,
+        trusted_hosts=("localhost",),
+        run_discord_bot=False,
+        port=8000,
         log_level="INFO",
     )
-    repository = GoogleSheetRepository(
-        sheet_id="unused", credentials_file=Path("unused.json"), credentials_info=None
-    )
+    repository = cast(Any, object())
     twitter = TwitterApiClient("unused")
     bot = EngagementBot(settings=settings, repository=repository, twitter=twitter)
     await bot.add_cog(EngagementCog(bot))
@@ -41,6 +45,6 @@ async def test_all_specified_slash_commands_register() -> None:
         "track-post",
         "low-activity-report",
         "reset-leaderboard",
-        "sync-sheet",
+        "sync-database",
     }
     await bot.close()
