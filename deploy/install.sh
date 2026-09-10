@@ -85,7 +85,7 @@ docker compose build --quiet app
 cat <<'EOF'
 
 =====================================================================
- Installation finished. Next steps (see docs/HETZNER_GUIDE.md):
+ Installation finished. Next steps (see the setup guide from Ravenium):
 
    majorbot edit-config     -> fill in the domain, Discord values, API key
    majorbot check           -> test everything without starting the bot

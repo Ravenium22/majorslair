@@ -11,3 +11,4 @@ static/
 .coverage
 *.egg-info/
 *.tsbuildinfo
+docs/

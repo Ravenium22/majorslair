@@ -128,7 +128,7 @@ def main() -> None:
     except SettingsError as exc:
         raise SystemExit(
             f"Configuration error: {exc}\n"
-            "Open the .env file and fill in the missing value (see docs/HETZNER_GUIDE.md)."
+            "Open the .env file and fill in the missing value (see the setup guide)."
         ) from exc
 
     logging.basicConfig(

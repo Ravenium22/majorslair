@@ -7,8 +7,8 @@ access, and PostgreSQL for durable operational data.
 Google Sheets is not used. The dashboard is the source of truth for members, scores, scans,
 tracked posts, configuration, and audit history.
 
-**Hosting it yourself with no technical background?** Follow
-[`docs/HETZNER_GUIDE.md`](docs/HETZNER_GUIDE.md). Everything below is the developer reference.
+**Hosting it yourself with no technical background?** Ask Ravenium for the step-by-step
+Hetzner setup guide. Everything below is the developer reference.
 
 ## What ships
 
@@ -115,13 +115,15 @@ snapshot rankings and start a new cycle without deleting action or audit history
 database password, schedules nightly backups, and installs a `majorbot` helper command
 (`edit-config`, `check`, `start`, `stop`, `restart`, `logs`, `update`, `backup`, `restore`).
 `docker-compose.yml` runs the app, PostgreSQL 16, and Caddy, which obtains and renews the HTTPS
-certificate for `DOMAIN` automatically. The click-by-click walkthrough is in
-[`docs/HETZNER_GUIDE.md`](docs/HETZNER_GUIDE.md).
+certificate for `DOMAIN` automatically. The click-by-click walkthrough is distributed
+separately by Ravenium.
 
 ### Railway
 
-Use [the Railway deployment guide](docs/RAILWAY_DEPLOYMENT.md). Set `APP_BASE_URL` to the Railway
-domain instead of `DOMAIN`. The Docker build compiles the React app, installs the Python service,
+Create one Docker service from this repository plus a managed PostgreSQL service, set the
+variables from `.env.example` (use `APP_BASE_URL` with the Railway domain instead of `DOMAIN`,
+and `DATABASE_URL=${{Postgres.DATABASE_URL}}`), and add `https://<domain>/auth/callback` as an
+OAuth redirect in the Discord Developer Portal. The Docker build compiles the React app, installs the Python service,
 applies migrations, and starts the web server and Discord gateway in one process.
 
 Health check: `GET /healthz`
@@ -137,7 +139,7 @@ Pop-Location
 docker build -t majors-lair-engagement-control .
 ```
 
-Scoring behavior is documented in [`docs/SCORING.md`](docs/SCORING.md).
+Scoring rules are editable on the dashboard's Scoring page; defaults live in `scoring.py`.
 
 ## Security and privacy
 
