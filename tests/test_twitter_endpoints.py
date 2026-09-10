@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+import yarl
 
 from majors_lair_bot.twitter_client import TwitterApiClient
 
@@ -57,8 +58,12 @@ async def test_exact_endpoint_parameter_names() -> None:
     assert calls["/twitter/user/info"] == {"userName": "m_m3l"}
     assert calls["/twitter/user/last_tweets"] == {
         "userName": "m_m3l",
-        "includeReplies": False,
+        "includeReplies": "false",
     }
+    for path, params in client.calls:
+        for key, value in params.items():
+            assert not isinstance(value, bool), f"{path} sends boolean {key}; yarl rejects it"
+            assert isinstance(value, (str, int)), f"{path} sends unsupported {key}={value!r}"
     assert calls["/twitter/tweet/replies"]["tweetId"] == "10"
     assert calls["/twitter/tweet/replies"]["sinceTime"] == int(since.timestamp())
     assert calls["/twitter/tweet/replies"]["untilTime"] == int(until.timestamp())
@@ -66,6 +71,15 @@ async def test_exact_endpoint_parameter_names() -> None:
     assert calls["/twitter/tweet/retweeters"] == {"tweetId": "10"}
     assert calls["/twitter/user/mentions"]["userName"] == "m_m3l"
     assert calls["/twitter/tweets"] == {"tweet_ids": "10,11"}
+
+
+def test_query_params_are_url_safe() -> None:
+    cleaned = TwitterApiClient._query_params(
+        {"includeReplies": False, "flag": True, "count": 5, "skip": None, "name": "x"}
+    )
+    assert cleaned == {"includeReplies": "false", "flag": "true", "count": "5", "name": "x"}
+    # The real URL builder must accept the cleaned values.
+    yarl.URL("https://example.test/path").with_query(cleaned)
 
 
 @pytest.mark.asyncio

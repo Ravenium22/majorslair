@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
@@ -83,13 +84,35 @@ class Settings:
         guild_id = _optional_int("DISCORD_GUILD_ID")
         if guild_id is None:
             raise SettingsError("Missing required environment variable: DISCORD_GUILD_ID")
-        app_base_url = _required("APP_BASE_URL").rstrip("/")
-        redirect_uri = _required("DISCORD_OAUTH_REDIRECT_URI")
-        hosts = tuple(
-            host.strip()
-            for host in os.getenv("TRUSTED_HOSTS", "localhost,127.0.0.1").split(",")
-            if host.strip()
+        domain = (
+            os.getenv("DOMAIN", "")
+            .strip()
+            .removeprefix("https://")
+            .removeprefix("http://")
+            .strip("/")
         )
+        app_base_url = os.getenv("APP_BASE_URL", "").strip().rstrip("/")
+        if not app_base_url:
+            if not domain:
+                raise SettingsError(
+                    "Set DOMAIN (for example lair.duckdns.org) or APP_BASE_URL "
+                    "(for example http://localhost:8000)"
+                )
+            app_base_url = f"https://{domain}"
+        parsed_base = urlparse(app_base_url)
+        if parsed_base.scheme not in {"http", "https"} or not parsed_base.hostname:
+            raise SettingsError("APP_BASE_URL must look like https://example.com")
+        redirect_uri = (
+            os.getenv("DISCORD_OAUTH_REDIRECT_URI", "").strip() or f"{app_base_url}/auth/callback"
+        )
+        raw_hosts = os.getenv("TRUSTED_HOSTS", "").strip()
+        if raw_hosts:
+            hosts = tuple(host.strip() for host in raw_hosts.split(",") if host.strip())
+        else:
+            hosts = tuple(
+                dict.fromkeys(["localhost", "127.0.0.1", parsed_base.hostname, domain or ""])
+            )
+            hosts = tuple(host for host in hosts if host)
 
         return cls(
             discord_token=_required("DISCORD_TOKEN"),

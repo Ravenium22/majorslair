@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import secrets
+import time
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
@@ -29,6 +30,9 @@ DISCORD_API = "https://discord.com/api/v10"
 SESSION_COOKIE = "majors_lair_session"
 OAUTH_STATE_COOKIE = "majors_lair_oauth_state"
 ADMINISTRATOR_PERMISSION = 1 << 3
+# Discord role membership is re-checked at most this often per signed-in admin. The
+# dashboard polls every 10 seconds, so without a cache every poll cost three Discord calls.
+ACCESS_CACHE_SECONDS = 60
 
 
 class AppRuntime:
@@ -41,6 +45,7 @@ class AppRuntime:
         self.bot: EngagementBot | None = None
         self.bot_task: asyncio.Task[None] | None = None
         self.scan_task: asyncio.Task[None] | None = None
+        self.access_cache: dict[str, tuple[float, list[str], bool]] = {}
 
     async def start(self) -> None:
         await self.repository.ensure_schema()
@@ -133,8 +138,11 @@ def _avatar_url(user: dict[str, Any]) -> str:
 
 
 async def _current_discord_access(
-    runtime: AppRuntime, user_id: str
+    runtime: AppRuntime, user_id: str, *, use_cache: bool = True
 ) -> tuple[list[str], bool]:
+    cached = runtime.access_cache.get(user_id)
+    if use_cache and cached and cached[0] > time.monotonic():
+        return cached[1], cached[2]
     headers = {"Authorization": f"Bot {runtime.settings.discord_token}"}
     guild_id = runtime.settings.discord_guild_id
     member_path = f"/guilds/{guild_id}/members/{user_id}"
@@ -150,7 +158,13 @@ async def _current_discord_access(
         role_map.get(role_id, 0) & ADMINISTRATOR_PERMISSION for role_id in role_ids
     )
     configured = bool(runtime.settings.admin_role_ids.intersection(map(int, role_ids)))
-    return role_ids, bool(is_owner or is_administrator or configured)
+    authorized = bool(is_owner or is_administrator or configured)
+    runtime.access_cache[user_id] = (
+        time.monotonic() + ACCESS_CACHE_SECONDS,
+        role_ids,
+        authorized,
+    )
+    return role_ids, authorized
 
 
 async def require_admin(request: Request) -> dict[str, Any]:
@@ -161,9 +175,7 @@ async def require_admin(request: Request) -> dict[str, Any]:
     session = await runtime.repository.get_admin_session(token)
     if session is None:
         raise HTTPException(status_code=401, detail="Session expired")
-    role_ids, authorized = await _current_discord_access(
-        runtime, str(session["discord_user_id"])
-    )
+    role_ids, authorized = await _current_discord_access(runtime, str(session["discord_user_id"]))
     if not authorized:
         await runtime.repository.delete_admin_session(token)
         raise HTTPException(status_code=403, detail="Engagement admin access required")
@@ -266,14 +278,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 headers=bearer,
             ),
         )
-        role_ids, authorized = await _current_discord_access(runtime, str(user["id"]))
+        role_ids, authorized = await _current_discord_access(
+            runtime, str(user["id"]), use_cache=False
+        )
         if not authorized:
             raise HTTPException(status_code=403, detail="Engagement admin access required")
         username = (
-            member.get("nick")
-            or user.get("global_name")
-            or user.get("username")
-            or user["id"]
+            member.get("nick") or user.get("global_name") or user.get("username") or user["id"]
         )
         session_token, _ = await runtime.repository.create_admin_session(
             discord_user_id=str(user["id"]),
@@ -311,8 +322,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         }
 
     @app.post("/api/logout")
-    async def logout(request: Request, _: MutatingAdmin) -> Response:
+    async def logout(request: Request, admin: MutatingAdmin) -> Response:
         await runtime.repository.delete_admin_session(request.cookies.get(SESSION_COOKIE, ""))
+        runtime.access_cache.pop(str(admin["discord_user_id"]), None)
         response = Response(status_code=204)
         response.delete_cookie(SESSION_COOKIE)
         return response

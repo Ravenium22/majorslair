@@ -320,9 +320,7 @@ class DatabaseRepository:
                 "discovered_at": isoformat(row.discovered_at),
                 "origin": row.origin,
                 "active": row.active,
-                "last_checked_at": isoformat(row.last_checked_at)
-                if row.last_checked_at
-                else "",
+                "last_checked_at": isoformat(row.last_checked_at) if row.last_checked_at else "",
                 "post_created_at": isoformat(row.post_created_at),
             }
             for row in rows
@@ -415,9 +413,7 @@ class DatabaseRepository:
         async with self.sessions.begin() as session:
             current_rows = (
                 await session.scalars(
-                    select(ActionRow)
-                    .where(ActionRow.cycle_id == cycle_id)
-                    .with_for_update()
+                    select(ActionRow).where(ActionRow.cycle_id == cycle_id).with_for_update()
                 )
             ).all()
             indexed = {row.action_key: row for row in current_rows}
@@ -513,9 +509,7 @@ class DatabaseRepository:
 
     async def reset_leaderboard(self, actor_discord_id: str) -> tuple[str, str, int]:
         reset_at = utc_now()
-        new_cycle = (
-            f"cycle_{reset_at.strftime('%Y%m%dT%H%M%SZ')}_{uuid.uuid4().hex[:6]}"
-        )
+        new_cycle = f"cycle_{reset_at.strftime('%Y%m%dT%H%M%SZ')}_{uuid.uuid4().hex[:6]}"
         snapshot_id = str(uuid.uuid4())
         async with self.sessions.begin() as session:
             current_cycle = await session.get(ConfigRow, "current_cycle_id", with_for_update=True)
@@ -588,9 +582,7 @@ class DatabaseRepository:
         }
 
     @staticmethod
-    async def _overview_counts(
-        session: AsyncSession, cycle_id: str
-    ) -> tuple[int, float, int, int]:
+    async def _overview_counts(session: AsyncSession, cycle_id: str) -> tuple[int, float, int, int]:
         linked_count = int(
             await session.scalar(
                 select(func.count()).select_from(UserRow).where(UserRow.active.is_(True))
@@ -599,15 +591,15 @@ class DatabaseRepository:
         )
         total_score = float(
             await session.scalar(
-                select(func.coalesce(func.sum(UserRow.score), 0)).where(
-                    UserRow.active.is_(True)
-                )
+                select(func.coalesce(func.sum(UserRow.score), 0)).where(UserRow.active.is_(True))
             )
             or 0
         )
         action_count = int(
             await session.scalar(
-                select(func.count()).select_from(ActionRow).where(ActionRow.active.is_(True))
+                select(func.count())
+                .select_from(ActionRow)
+                .where(ActionRow.active.is_(True))
                 .where(ActionRow.cycle_id == cycle_id)
             )
             or 0
@@ -660,9 +652,7 @@ class DatabaseRepository:
             "total": total,
         }
 
-    async def set_user_active(
-        self, discord_user_id: str, active: bool
-    ) -> LinkedUser | None:
+    async def set_user_active(self, discord_user_id: str, active: bool) -> LinkedUser | None:
         async with self.sessions.begin() as session:
             row = await session.get(UserRow, discord_user_id, with_for_update=True)
             if row is None:
@@ -674,8 +664,7 @@ class DatabaseRepository:
                         UserRow.discord_user_id != discord_user_id,
                         or_(
                             UserRow.twitter_user_id == row.twitter_user_id,
-                            func.lower(UserRow.twitter_handle)
-                            == row.twitter_handle.lower(),
+                            func.lower(UserRow.twitter_handle) == row.twitter_handle.lower(),
                         ),
                     )
                 )
@@ -779,9 +768,7 @@ class DatabaseRepository:
             "error": row.error,
         }
 
-    async def create_scan_run(
-        self, *, period: str, triggered_by: str, source: str
-    ) -> str:
+    async def create_scan_run(self, *, period: str, triggered_by: str, source: str) -> str:
         scan_id = str(uuid.uuid4())
         async with self.sessions.begin() as session:
             session.add(
@@ -818,9 +805,7 @@ class DatabaseRepository:
         async with self.sessions() as session:
             rows = (
                 await session.scalars(
-                    select(ScanRunRow)
-                    .order_by(ScanRunRow.started_at.desc())
-                    .limit(limit)
+                    select(ScanRunRow).order_by(ScanRunRow.started_at.desc()).limit(limit)
                 )
             ).all()
         return [self._scan_dict(row) for row in rows]
@@ -863,9 +848,7 @@ class DatabaseRepository:
         token_hash = self.hash_session_token(token)
         now = utc_now()
         async with self.sessions.begin() as session:
-            await session.execute(
-                delete(AdminSessionRow).where(AdminSessionRow.expires_at <= now)
-            )
+            await session.execute(delete(AdminSessionRow).where(AdminSessionRow.expires_at <= now))
             row = await session.get(AdminSessionRow, token_hash)
             if row is None:
                 return None

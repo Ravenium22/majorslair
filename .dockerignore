@@ -1,0 +1,15 @@
+.git
+.venv
+.env
+.env.*
+!.env.example
+admin/node_modules
+static
+backups
+__pycache__
+*.py[cod]
+.pytest_cache
+.ruff_cache
+tests
+docs
+deploy

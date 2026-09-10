@@ -48,3 +48,16 @@ async def test_all_specified_slash_commands_register() -> None:
         "sync-database",
     }
     await bot.close()
+
+
+@pytest.mark.asyncio
+async def test_second_scan_is_rejected_while_one_runs() -> None:
+    from majors_lair_bot.engagement import EngagementService
+
+    service = EngagementService(cast(Any, object()), TwitterApiClient("unused"))
+    await service._scan_lock.acquire()
+    try:
+        with pytest.raises(ValueError, match="already running"):
+            await service.scan(period="24h", actor_discord_id="1")
+    finally:
+        service._scan_lock.release()

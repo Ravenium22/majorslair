@@ -2,10 +2,13 @@
 
 A private Discord bot and web admin console for measuring thoughtful X engagement around
 `@m_m3l` and `@majorslair`. It uses **twitterapi.io** for public X data, Discord OAuth for admin
-access, and Railway PostgreSQL for durable operational data.
+access, and PostgreSQL for durable operational data.
 
 Google Sheets is not used. The dashboard is the source of truth for members, scores, scans,
 tracked posts, configuration, and audit history.
+
+**Hosting it yourself with no technical background?** Follow
+[`docs/HETZNER_GUIDE.md`](docs/HETZNER_GUIDE.md). Everything below is the developer reference.
 
 ## What ships
 
@@ -17,7 +20,10 @@ tracked posts, configuration, and audit history.
 - CSRF-protected mutations and opaque, hashed, expiring database sessions
 - Confirmed leaderboard resets with permanent historical snapshots
 - PostgreSQL transactions, indexes, Alembic migrations, and no spreadsheet bottleneck
-- One Railway Docker service for the bot/API/site plus one managed PostgreSQL service
+- Startup preflight (`majors-lair-bot check`) with plain-language errors for a bad token, a
+  wrong server ID, an unreachable database, or an empty twitterapi.io balance
+- Docker Compose stack (app + PostgreSQL + Caddy HTTPS) with a one-line Hetzner installer,
+  nightly backups, and a `majorbot` helper command; Railway files are still included
 
 ## Discord commands
 
@@ -45,16 +51,14 @@ the control panel.
 
 ```text
 Discord members ── slash commands ──┐
-                                    ├── Railway application service
-Admins ── Discord OAuth ── web UI ──┤   FastAPI + React + Discord bot
-                                    │       │
-X public data ── twitterapi.io ─────┘       └── Railway private network
-                                                    │
-                                             Railway PostgreSQL
+                                    ├── app container (FastAPI + React + Discord bot)
+Admins ── Discord OAuth ── web UI ──┤        │
+     (HTTPS via Caddy) ─────────────┘        └── PostgreSQL container (private network)
+X public data ── twitterapi.io ──────────────┘
 ```
 
-The application and database stay in one Railway project. Railway injects the private
-`DATABASE_URL`; the database does not need a public endpoint.
+On Hetzner all three run from `docker-compose.yml` on one small server. On Railway the app is one
+Docker service and PostgreSQL is Railway's managed service; Railway injects `DATABASE_URL`.
 
 ## Local development
 
@@ -79,8 +83,10 @@ Open `http://localhost:8000`. For local OAuth, add
 
 ## Environment
 
-Copy [`.env.example`](.env.example). Required secrets are the Discord bot token, Discord OAuth
-client secret, and twitterapi.io API key. Railway creates the database URL.
+Copy [`.env.example`](.env.example). Required values are `DOMAIN` (or `APP_BASE_URL`), the
+Discord bot token, guild ID, OAuth client ID and secret, the twitterapi.io key, and a database
+URL. `DISCORD_OAUTH_REDIRECT_URI` and `TRUSTED_HOSTS` are derived from `DOMAIN`/`APP_BASE_URL`
+when left empty. Run `majors-lair-bot check` to validate everything without starting the bot.
 
 Never commit `.env`, tokens, API keys, database URLs, or screenshots containing them.
 
@@ -103,9 +109,20 @@ snapshot rankings and start a new cycle without deleting action or audit history
 
 ## Deployment
 
-Use [the Railway deployment guide](docs/RAILWAY_DEPLOYMENT.md). The Docker build compiles the
-React app, installs the Python service, applies migrations, and starts the web server and Discord
-gateway in one process.
+### Hetzner or any Ubuntu VPS (recommended)
+
+`deploy/install.sh` installs Docker, clones the repository into `/opt/majorbot`, generates the
+database password, schedules nightly backups, and installs a `majorbot` helper command
+(`edit-config`, `check`, `start`, `stop`, `restart`, `logs`, `update`, `backup`, `restore`).
+`docker-compose.yml` runs the app, PostgreSQL 16, and Caddy, which obtains and renews the HTTPS
+certificate for `DOMAIN` automatically. The click-by-click walkthrough is in
+[`docs/HETZNER_GUIDE.md`](docs/HETZNER_GUIDE.md).
+
+### Railway
+
+Use [the Railway deployment guide](docs/RAILWAY_DEPLOYMENT.md). Set `APP_BASE_URL` to the Railway
+domain instead of `DOMAIN`. The Docker build compiles the React app, installs the Python service,
+applies migrations, and starts the web server and Discord gateway in one process.
 
 Health check: `GET /healthz`
 

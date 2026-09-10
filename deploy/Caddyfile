@@ -1,0 +1,6 @@
+# Caddy terminates HTTPS (free Let's Encrypt certificate, renewed automatically)
+# and forwards traffic to the application container.
+{$DOMAIN} {
+	encode gzip
+	reverse_proxy app:8000
+}

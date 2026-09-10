@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import logging
 from typing import Any
 
@@ -45,6 +46,19 @@ class ResetConfirmation(discord.ui.View):
         self.bot = bot
         self.requester_id = requester_id
         self.completed = False
+        self.message: discord.Message | None = None
+
+    async def on_timeout(self) -> None:
+        if self.completed:
+            return
+        for child in self.children:
+            if isinstance(child, discord.ui.Button):
+                child.disabled = True
+        if self.message is not None:
+            with contextlib.suppress(discord.HTTPException):
+                await self.message.edit(
+                    content="Leaderboard reset confirmation expired.", view=self
+                )
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.requester_id:
@@ -128,13 +142,14 @@ class EngagementCog(commands.Cog):
     @app_commands.command(name="unlink-twitter", description="Deactivate your linked X account")
     @app_commands.guild_only()
     async def unlink_twitter(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
         old_handle = await self.bot.service.unlink_user(discord_user_id=str(interaction.user.id))
         if not old_handle:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "You do not have an active linked X account.", ephemeral=True
             )
             return
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"Unlinked **@{old_handle}**. Your history remains preserved.", ephemeral=True
         )
         await self.bot.audit(
@@ -146,10 +161,11 @@ class EngagementCog(commands.Cog):
     )
     @app_commands.guild_only()
     async def leaderboard(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(thinking=True)
         users = await self.bot.repository.list_users(active_only=True)
         ranked = sorted(users, key=lambda user: (-user.score, user.discord_username.lower()))
         if not ranked:
-            await interaction.response.send_message("No linked members yet.")
+            await interaction.followup.send("No linked members yet.")
             return
         lines = [
             f"**{index}.** <@{user.discord_user_id}> · "
@@ -172,11 +188,12 @@ class EngagementCog(commands.Cog):
         if own_rank:
             own = ranked[own_rank - 1]
             embed.set_footer(text=f"Your rank: #{own_rank} · {score_label(own.score)} points")
-        await interaction.response.send_message(embed=embed)
+        await interaction.followup.send(embed=embed)
 
     @app_commands.command(name="my-score", description="Show your score and rank for this cycle")
     @app_commands.guild_only()
     async def my_score(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
         users = await self.bot.repository.list_users(active_only=True)
         ranked = sorted(users, key=lambda user: (-user.score, user.discord_username.lower()))
         rank = next(
@@ -188,12 +205,12 @@ class EngagementCog(commands.Cog):
             None,
         )
         if rank is None:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "Link an X account first with `/link-twitter`.", ephemeral=True
             )
             return
         user = ranked[rank - 1]
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"You are **#{rank}** of {len(ranked)} with "
             f"**{score_label(user.score)} points** (`@{user.twitter_handle}`).",
             ephemeral=True,
@@ -202,11 +219,12 @@ class EngagementCog(commands.Cog):
     @app_commands.command(name="my-history", description="Show how your latest actions were scored")
     @app_commands.guild_only()
     async def my_history(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
         config = await self.bot.repository.get_config()
         cycle_id = config.get("current_cycle_id", DEFAULT_CONFIG["current_cycle_id"])
         history = await self.bot.repository.user_history(str(interaction.user.id), cycle_id, 10)
         if not history:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "No engagement actions are logged for you in this cycle yet.", ephemeral=True
             )
             return
@@ -222,10 +240,13 @@ class EngagementCog(commands.Cog):
                 value=f"{link}{action.reason}"[:1024],
                 inline=False,
             )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
-    async def _run_scan(self, interaction: discord.Interaction, period: str) -> None:
+    async def _run_scan(self, interaction: discord.Interaction, period: str | None) -> None:
         await interaction.response.defer(thinking=True)
+        if period is None:
+            config = await self.bot.repository.get_config()
+            period = config.get("default_refresh_period", DEFAULT_CONFIG["default_refresh_period"])
         summary = await self.bot.service.scan(
             period=period, actor_discord_id=str(interaction.user.id)
         )
@@ -289,9 +310,7 @@ class EngagementCog(commands.Cog):
     @app_commands.guild_only()
     @admin_only()
     async def refresh_engagement(self, interaction: discord.Interaction) -> None:
-        config = await self.bot.repository.get_config()
-        period = config.get("default_refresh_period", DEFAULT_CONFIG["default_refresh_period"])
-        await self._run_scan(interaction, period)
+        await self._run_scan(interaction, None)
 
     @app_commands.command(
         name="track-post", description="Manually track an important Major/Lair X post"
@@ -321,6 +340,7 @@ class EngagementCog(commands.Cog):
     async def low_activity_report(
         self, interaction: discord.Interaction, threshold: float | None = None
     ) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
         config = await self.bot.repository.get_config()
         effective = threshold
         if effective is None:
@@ -343,7 +363,7 @@ class EngagementCog(commands.Cog):
             description=description,
             color=discord.Color.orange(),
         )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.followup.send(embed=embed, ephemeral=True)
         await self.bot.repository.append_audit(
             event_type="low_activity_report",
             actor_discord_id=str(interaction.user.id),
@@ -368,6 +388,7 @@ class EngagementCog(commands.Cog):
             view=view,
             ephemeral=True,
         )
+        view.message = await interaction.original_response()
 
     @app_commands.command(
         name="sync-database", description="Ensure database tables and recalculate current scores"

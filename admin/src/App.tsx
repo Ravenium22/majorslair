@@ -139,7 +139,7 @@ function Shell({ session, children }: { session: Session; children: ReactNode })
         </nav>
         <div className="sidebar-system">
           <p className="nav-label">Infrastructure</p>
-          <div><Database size={16} /><span>Railway Postgres<small>Managed · persistent</small></span></div>
+          <div><Database size={16} /><span>PostgreSQL<small>Local · backed up nightly</small></span></div>
           <div><Bot size={16} /><span>Discord gateway<small>Role protected</small></span></div>
         </div>
         <div className="profile">

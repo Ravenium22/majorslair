@@ -195,16 +195,30 @@ class TwitterApiClient:
         self.request_count = 0
         self.items_returned = 0
 
+    @staticmethod
+    def _query_params(params: dict[str, Any] | None) -> dict[str, str]:
+        """Coerce values to strings; aiohttp/yarl reject booleans and None outright."""
+        cleaned: dict[str, str] = {}
+        for key, value in (params or {}).items():
+            if value is None:
+                continue
+            if isinstance(value, bool):
+                cleaned[key] = "true" if value else "false"
+            else:
+                cleaned[key] = str(value)
+        return cleaned
+
     async def _request_json(
         self, path: str, *, params: dict[str, Any] | None = None
     ) -> dict[str, Any]:
         await self.start()
         assert self._session is not None
+        query = self._query_params(params)
         last_error: Exception | None = None
         for attempt in range(5):
             try:
                 self.request_count += 1
-                async with self._session.get(f"{BASE_URL}{path}", params=params) as response:
+                async with self._session.get(f"{BASE_URL}{path}", params=query) as response:
                     try:
                         payload = await response.json(content_type=None)
                     except (aiohttp.ContentTypeError, ValueError) as exc:
@@ -212,6 +226,10 @@ class TwitterApiClient:
                         raise TwitterApiError(
                             f"Non-JSON response: {body}", status=response.status, path=path
                         ) from exc
+                    if not isinstance(payload, dict):
+                        raise TwitterApiError(
+                            "Unexpected JSON response shape", status=response.status, path=path
+                        )
                     if response.status == 402:
                         raise TwitterApiError(
                             "twitterapi.io balance is empty; top it up in the dashboard",
@@ -240,8 +258,6 @@ class TwitterApiClient:
                             status=response.status,
                             path=path,
                         )
-                    if not isinstance(payload, dict):
-                        raise TwitterApiError("Unexpected JSON response shape", path=path)
                     return payload
             except (TimeoutError, aiohttp.ClientError, TwitterApiError) as exc:
                 last_error = exc
@@ -340,7 +356,7 @@ class TwitterApiClient:
 
         result = await self._paginate(
             "/twitter/user/last_tweets",
-            params={"userName": handle, "includeReplies": False},
+            params={"userName": handle, "includeReplies": "false"},
             item_key="tweets",
             max_pages=max_pages,
             stop_when=reached_cutoff,

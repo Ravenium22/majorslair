@@ -31,9 +31,7 @@ async def test_health_endpoint_starts_without_discord_gateway() -> None:
     app = create_app(settings)
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(
-            transport=transport, base_url="http://testserver"
-        ) as client:
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
             response = await client.get("/healthz")
 
     assert response.status_code == 200

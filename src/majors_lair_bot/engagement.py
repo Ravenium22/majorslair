@@ -479,13 +479,15 @@ class EngagementService:
         scan_id: str | None = None,
     ) -> ScanSummary:
         parse_period(period)
+        if self._scan_lock.locked():
+            raise ValueError(
+                "An engagement scan is already running. Wait for it to finish, then try again."
+            )
         run_id = scan_id or await self.repository.create_scan_run(
             period=period, triggered_by=actor_discord_id, source=source
         )
         try:
-            summary = await self._scan_impl(
-                period=period, actor_discord_id=actor_discord_id
-            )
+            summary = await self._scan_impl(period=period, actor_discord_id=actor_discord_id)
             summary.scan_id = run_id
             await self.repository.finish_scan_run(run_id, summary=asdict(summary))
             return summary
@@ -493,9 +495,7 @@ class EngagementService:
             await self.repository.finish_scan_run(run_id, error=str(exc))
             raise
 
-    async def _scan_impl(
-        self, *, period: str, actor_discord_id: str
-    ) -> ScanSummary:
+    async def _scan_impl(self, *, period: str, actor_discord_id: str) -> ScanSummary:
         duration, period_label = parse_period(period)
         async with self._scan_lock:
             config = await self.repository.get_config()
