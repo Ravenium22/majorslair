@@ -16,7 +16,7 @@ What you end up with:
 
 ---
 
-## Part 0 - For Efe: before handing this over
+## Part 0 - For Ravenium: before handing this over
 
 The code lives at <https://github.com/Ravenium22/majorslair>. If that repository is private,
 either make it public (there are no secrets in the code) or create a fine-grained personal
@@ -272,7 +272,7 @@ The account is not the server owner, not an administrator, and not in `ADMIN_ROL
 Add credit at <https://twitterapi.io/dashboard>.
 
 **A command in Discord says "The command failed unexpectedly".**
-Run `majorbot logs` and send the last 30 lines to Efe.
+Run `majorbot logs` and send the last 30 lines to Ravenium.
 
 **I lost the server password.**
 In the Hetzner console open the server, click **Rescue > Reset root password**.
