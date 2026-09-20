@@ -788,6 +788,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def scans(_: Admin, limit: int = Query(default=20, ge=1, le=100)) -> list[dict[str, Any]]:
         return await runtime.repository.recent_scans(limit)
 
+    @app.get("/api/scan-runs")
+    async def scan_runs(_: Admin, page: int = 1, page_size: int = 25) -> dict[str, Any]:
+        page, page_size = _page(page, page_size)
+        return await runtime.repository.paginated_scans(page=page, page_size=page_size)
+
     @app.get("/api/low-activity")
     async def low_activity(
         _: Admin, threshold: float | None = None, include_protected: bool = False

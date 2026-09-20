@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
+from typing import Any
 
 
 class ActionType(StrEnum):
@@ -113,3 +114,5 @@ class ScanSummary:
     x_checked: int = 0
     x_unavailable: list[dict[str, str]] = field(default_factory=list)
     x_renamed: list[dict[str, str]] = field(default_factory=list)
+    score_changes: list[dict[str, Any]] = field(default_factory=list)
+    score_changes_total: int = 0

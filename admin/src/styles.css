@@ -168,3 +168,15 @@ td .muted { color: var(--muted); }
 .estimate-grid div.wide { grid-column: 1 / -1; }
 .estimate-grid dd small { line-height: 1.5; }
 .estimate-warning { margin: 14px 0 0; padding: 10px 12px; border: 1px solid #6a4a20; background: #2a1f10; color: #f0c98a; font-size: 12px; line-height: 1.5; }
+.scan-table .chev { width: 28px; color: var(--muted-2); }
+.scan-row { cursor: pointer; }.scan-row:hover td { background: #101414; }.scan-row.open td { background: #0f1313; }
+.scan-detail td { padding: 18px 22px 22px 46px; background: #0b0e0e; border-bottom: 1px solid var(--line); }
+.report-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+.report-grid section, .report-block { padding: 14px 16px; border: 1px solid var(--line-soft); background: #0e1111; }
+.report-block { margin-top: 14px; }
+.report-grid h4, .report-block h4 { margin: 0 0 10px; color: var(--amber); font: 600 10px "Cascadia Mono", Consolas, monospace; letter-spacing: .1em; text-transform: uppercase; }
+.report-grid dl { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; margin: 0; }
+.report-grid dt { color: var(--muted); font-size: 11px; }.report-grid dd { margin: 2px 0 0; font-size: 15px; font-weight: 650; }.report-grid dd small { color: var(--muted); font-weight: 400; font-size: 11px; }
+.score.gain { color: var(--green); }.score.loss { color: var(--red); }
+.warning-list { margin: 0; padding-left: 18px; color: #f0c98a; font-size: 12px; line-height: 1.6; }
+.muted.small { font-size: 11px; color: var(--muted); }.page-note { display: flex; align-items: center; gap: 6px; margin: 14px 0 0; }

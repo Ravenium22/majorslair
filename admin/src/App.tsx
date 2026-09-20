@@ -9,6 +9,7 @@ import {
   LogOut,
   Menu,
   Radar,
+  ScrollText,
   Settings2,
   Users,
   X,
@@ -23,12 +24,14 @@ import ScoringPage from './pages/ScoringPage'
 
 const ActivityPage = lazy(() => import('./pages/ActivityPage'))
 const AuditPage = lazy(() => import('./pages/AuditPage'))
+const ScansPage = lazy(() => import('./pages/ScansPage'))
 
 const routes = [
   { id: 'overview', label: 'Overview', icon: CircleGauge },
   { id: 'members', label: 'Members', icon: Users },
   { id: 'activity', label: 'Activity log', icon: Activity },
   { id: 'posts', label: 'Tracked posts', icon: Radar },
+  { id: 'scans', label: 'Scan reports', icon: ScrollText },
   { id: 'scoring', label: 'Scoring rules', icon: Settings2 },
   { id: 'audit', label: 'Audit trail', icon: BookOpenCheck },
 ] as const
@@ -102,6 +105,7 @@ function Shell({ session, children }: { session: Session; children: ReactNode })
       case 'members': return <MembersPage session={session} />
       case 'activity': return <ActivityPage />
       case 'posts': return <PostsPage session={session} />
+      case 'scans': return <ScansPage />
       case 'scoring': return <ScoringPage session={session} />
       case 'audit': return <AuditPage />
       default: return <OverviewPage session={session} />

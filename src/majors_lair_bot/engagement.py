@@ -704,6 +704,7 @@ class EngagementService:
 
             summary = ScanSummary(period_label=period_label)
             users = await self.repository.list_users(active_only=True)
+            scores_before = {user.discord_user_id: user.score for user in users}
             skipped_ids: set[str] = set()
             if not include_protected:
                 skipped_ids = {user.discord_user_id for user in users if user.special_role}
@@ -778,6 +779,22 @@ class EngagementService:
                 ignore_discord_ids=skipped_ids,
             )
             await self.rescore_current_cycle(config=config)
+            changes = []
+            for user in await self.repository.list_users(active_only=True):
+                before = scores_before.get(user.discord_user_id, 0.0)
+                if abs(user.score - before) > 1e-9:
+                    changes.append(
+                        {
+                            "discord_user_id": user.discord_user_id,
+                            "discord_username": user.discord_username,
+                            "twitter_handle": user.twitter_handle,
+                            "before": round(before, 2),
+                            "after": round(user.score, 2),
+                        }
+                    )
+            changes.sort(key=lambda item: item["after"] - item["before"], reverse=True)
+            summary.score_changes_total = len(changes)
+            summary.score_changes = changes[:100]
             if verify_x:
                 await self.verify_linked_accounts(
                     actor_discord_id=actor_discord_id,

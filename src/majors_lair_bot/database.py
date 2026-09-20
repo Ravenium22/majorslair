@@ -928,6 +928,24 @@ class DatabaseRepository:
             row.summary = summary or {}
             row.error = error[:4000]
 
+    async def paginated_scans(self, *, page: int = 1, page_size: int = 25) -> dict[str, Any]:
+        count_statement = select(func.count()).select_from(ScanRunRow)
+        statement = (
+            select(ScanRunRow)
+            .order_by(ScanRunRow.started_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+        async with self.sessions() as session:
+            total = int(await session.scalar(count_statement) or 0)
+            rows = (await session.scalars(statement)).all()
+        return {
+            "items": [self._scan_dict(row) for row in rows],
+            "page": page,
+            "page_size": page_size,
+            "total": total,
+        }
+
     async def recent_scans(self, limit: int = 20) -> list[dict[str, Any]]:
         async with self.sessions() as session:
             rows = (

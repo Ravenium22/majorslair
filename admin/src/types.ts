@@ -33,6 +33,23 @@ export type Scan = {
   error: string
 }
 
+export type ScanRun = {
+  scan_id: string
+  period: string
+  status: 'running' | 'complete' | 'failed'
+  triggered_by: string
+  source: string
+  started_at: string
+  completed_at: string
+  summary: Record<string, unknown> & {
+    score_changes?: { discord_user_id: string; discord_username: string; twitter_handle: string; before: number; after: number }[]
+    x_unavailable?: { discord_user_id: string; discord_username: string; twitter_handle: string; status: string; reason: string }[]
+    x_renamed?: { discord_user_id: string; discord_username: string; old_handle: string; new_handle: string }[]
+    warnings?: string[]
+  }
+  error: string
+}
+
 export type Overview = {
   linked_members: number
   total_score: number
