@@ -93,6 +93,16 @@ class LinkUserRequest(BaseModel):
     twitter_handle: str = Field(min_length=1, max_length=32)
 
 
+class ImportRow(BaseModel):
+    discord_user_id: str = Field(min_length=5, max_length=32, pattern=r"^\d+$")
+    discord_username: str = Field(min_length=1, max_length=120)
+    twitter_handle: str = Field(default="", max_length=64)
+
+
+class ImportRequest(BaseModel):
+    rows: list[ImportRow] = Field(min_length=1, max_length=500)
+
+
 class ScanRequest(BaseModel):
     period: str = Field(default="24h", min_length=2, max_length=10)
 
@@ -369,6 +379,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             new_value=handle,
         )
         return {"twitter_handle": handle, "twitter_user_id": twitter_id}
+
+    @app.post("/api/users/import")
+    async def import_users(payload: ImportRequest, admin: MutatingAdmin) -> dict[str, Any]:
+        seen: set[str] = set()
+        rows: list[tuple[str, str, str]] = []
+        for row in payload.rows:
+            if row.discord_user_id in seen:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Discord ID {row.discord_user_id} appears more than once",
+                )
+            seen.add(row.discord_user_id)
+            rows.append((row.discord_user_id, row.discord_username.strip(), row.twitter_handle))
+        results = await runtime.service.import_links(
+            rows, actor_discord_id=str(admin["discord_user_id"])
+        )
+        summary: dict[str, int] = {}
+        for item in results:
+            summary[item["status"]] = summary.get(item["status"], 0) + 1
+        return {"summary": summary, "results": results}
 
     @app.patch("/api/users/{discord_user_id}")
     async def update_user(

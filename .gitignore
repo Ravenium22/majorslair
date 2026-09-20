@@ -12,3 +12,7 @@ static/
 *.egg-info/
 *.tsbuildinfo
 docs/
+
+# Member exports and screenshots dropped in the project root
+*.csv
+*.png

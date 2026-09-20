@@ -6,7 +6,7 @@ from dataclasses import asdict
 from datetime import datetime
 from typing import Any
 
-from .database import DatabaseRepository
+from .database import DatabaseRepository, LinkConflictError
 from .models import (
     ActionType,
     EngagementAction,
@@ -64,6 +64,74 @@ class EngagementService:
             details={"twitter_user_id": twitter_user_id},
         )
         return old_handle, new_handle, twitter_user_id
+
+    async def import_links(
+        self,
+        rows: list[tuple[str, str, str]],
+        *,
+        actor_discord_id: str,
+        concurrency: int = 4,
+    ) -> list[dict[str, str]]:
+        """Bulk-link (discord_user_id, discord_username, handle) rows from a spreadsheet.
+
+        Every row gets a result with a ``status`` of linked, relinked, unchanged, skipped,
+        conflict, or failed, in input order. Rows already linked to the same handle are
+        left alone without spending a twitterapi.io lookup. A rejected key or an empty
+        balance aborts the remaining lookups instead of failing them one by one.
+        """
+        semaphore = asyncio.Semaphore(max(1, concurrency))
+        abort_message: str | None = None
+
+        async def process(row: tuple[str, str, str]) -> dict[str, str]:
+            nonlocal abort_message
+            discord_user_id, discord_username, raw_handle = row
+            result = {
+                "discord_user_id": discord_user_id,
+                "discord_username": discord_username,
+                "twitter_handle": raw_handle.strip().removeprefix("@"),
+            }
+            if not raw_handle.strip():
+                return {**result, "status": "skipped", "message": "No X handle in the sheet"}
+            try:
+                normalized = normalize_handle(raw_handle)
+            except ValueError as exc:
+                return {**result, "status": "failed", "message": str(exc)}
+            result["twitter_handle"] = normalized
+            existing = await self.repository.get_user(discord_user_id)
+            if existing and existing.active and existing.twitter_handle == normalized:
+                return {**result, "status": "unchanged", "message": "Already linked"}
+            async with semaphore:
+                if abort_message:
+                    return {**result, "status": "failed", "message": abort_message}
+                try:
+                    old_handle, new_handle, _ = await self.link_user(
+                        discord_user_id=discord_user_id,
+                        discord_username=discord_username,
+                        handle=normalized,
+                    )
+                except LinkConflictError as exc:
+                    return {**result, "status": "conflict", "message": str(exc)}
+                except TwitterApiError as exc:
+                    if exc.status in {401, 402}:
+                        abort_message = str(exc)
+                    if exc.status == 404 or "not found" in str(exc).lower():
+                        return {**result, "status": "failed", "message": "X account not found"}
+                    return {**result, "status": "failed", "message": str(exc)}
+            result["twitter_handle"] = new_handle
+            if old_handle and old_handle != new_handle:
+                return {**result, "status": "relinked", "message": f"Was @{old_handle}"}
+            return {**result, "status": "linked", "message": "Linked and verified"}
+
+        results = list(await asyncio.gather(*(process(row) for row in rows)))
+        counts: dict[str, int] = {}
+        for item in results:
+            counts[item["status"]] = counts.get(item["status"], 0) + 1
+        await self.repository.append_audit(
+            event_type="admin_members_imported",
+            actor_discord_id=actor_discord_id,
+            details={"rows": len(rows), **counts},
+        )
+        return results
 
     async def unlink_user(self, *, discord_user_id: str) -> str:
         old_handle = await self.repository.unlink_user(discord_user_id)

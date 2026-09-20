@@ -86,3 +86,15 @@ export type AuditEntry = {
   details: Record<string, unknown>
   created_at: string
 }
+
+export type ImportStatus = 'linked' | 'relinked' | 'unchanged' | 'skipped' | 'conflict' | 'failed'
+
+export type ImportResult = {
+  discord_user_id: string
+  discord_username: string
+  twitter_handle: string
+  status: ImportStatus
+  message: string
+}
+
+export type ImportResponse = { summary: Partial<Record<ImportStatus, number>>; results: ImportResult[] }
