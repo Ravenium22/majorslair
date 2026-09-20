@@ -57,7 +57,7 @@ class AppRuntime:
                 twitter=self.twitter,
             )
             self.bot_task = asyncio.create_task(
-                self.bot.start(self.settings.discord_token, log_handler=None),
+                self.bot.start(self.settings.discord_token),
                 name="discord-bot",
             )
             self.bot_task.add_done_callback(self._log_bot_exit)
