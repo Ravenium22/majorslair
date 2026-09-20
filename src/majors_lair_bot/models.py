@@ -42,6 +42,9 @@ class Tweet:
     reply_to_tweet_id: str = ""
     quoted_tweet_id: str = ""
     is_retweet: bool = False
+    reply_count: int = 0
+    quote_count: int = 0
+    retweet_count: int = 0
 
     @property
     def url(self) -> str:
@@ -101,6 +104,7 @@ class ScanSummary:
     retweets: int = 0
     mentions: int = 0
     skipped_unlinked: int = 0
+    skipped_protected: int = 0
     incomplete_scopes: int = 0
     api_requests: int = 0
     tweets_returned: int = 0

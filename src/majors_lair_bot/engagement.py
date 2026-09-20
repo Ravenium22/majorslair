@@ -25,6 +25,7 @@ from .twitter_client import (
 from .utils import (
     isoformat,
     normalize_handle,
+    parse_bool,
     parse_datetime,
     parse_period,
     parse_status_url,
@@ -39,6 +40,7 @@ class EngagementService:
         self.repository = repository
         self.twitter = twitter
         self._scan_lock = asyncio.Lock()
+        self._estimate_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 
     async def link_user(
         self, *, discord_user_id: str, discord_username: str, handle: str
@@ -651,12 +653,18 @@ class EngagementService:
         source: str = "discord",
         scan_id: str | None = None,
         verify_x: bool = True,
-        include_protected: bool = True,
+        include_protected: bool | None = None,
     ) -> ScanSummary:
+        """Run a scan. ``include_protected=None`` follows the skip_protected_members setting."""
         parse_period(period)
         if self._scan_lock.locked():
             raise ValueError(
                 "An engagement scan is already running. Wait for it to finish, then try again."
+            )
+        if include_protected is None:
+            config = await self.repository.get_config()
+            include_protected = not parse_bool(
+                config.get("skip_protected_members", DEFAULT_CONFIG["skip_protected_members"])
             )
         run_id = scan_id or await self.repository.create_scan_run(
             period=period, triggered_by=actor_discord_id, source=source
@@ -696,6 +704,11 @@ class EngagementService:
 
             summary = ScanSummary(period_label=period_label)
             users = await self.repository.list_users(active_only=True)
+            skipped_ids: set[str] = set()
+            if not include_protected:
+                skipped_ids = {user.discord_user_id for user in users if user.special_role}
+                users = [user for user in users if not user.special_role]
+                summary.skipped_protected = len(skipped_ids)
             by_id, by_handle = self._user_indexes(users)
             self.twitter.reset_usage()
 
@@ -759,7 +772,10 @@ class EngagementService:
             summary.retweets = sum(a.action_type == ActionType.RETWEET for a in discovered)
             summary.mentions = sum(a.action_type == ActionType.MENTION for a in discovered)
             summary.changed_actions = await self.repository.reconcile_actions(
-                cycle_id=cycle_id, discovered=discovered, scopes=scopes
+                cycle_id=cycle_id,
+                discovered=discovered,
+                scopes=scopes,
+                ignore_discord_ids=skipped_ids,
             )
             await self.rescore_current_cycle(config=config)
             if verify_x:
@@ -801,9 +817,83 @@ class EngagementService:
                     "x_checked": summary.x_checked,
                     "x_unavailable": len(summary.x_unavailable),
                     "x_renamed": len(summary.x_renamed),
+                    "skipped_protected": summary.skipped_protected,
                 },
             )
             return summary
+
+    async def estimate_scan(self, period: str, *, max_age_seconds: int = 600) -> dict[str, Any]:
+        """Estimate what a scan of ``period`` will cost, from the source posts' own counters.
+
+        Fetches the tracked accounts' posts for the window (the same pages a scan fetches
+        first) and sums their reply, quote, and retweet counters, capped by the configured
+        page limits. Mentions cannot be counted ahead of time, so they are reported as an
+        upper bound. Results are cached briefly so reopening the dialog is free.
+        """
+        duration, period_label = parse_period(period)
+        cached = self._estimate_cache.get(period_label)
+        now_ts = utc_now().timestamp()
+        if cached and now_ts - cached[0] < max_age_seconds:
+            return {**cached[1], "cached": True}
+
+        config = await self.repository.get_config()
+        rules = ScoringRules.from_mapping(config)
+        until = utc_now()
+        since = until - duration
+        cycle_started_at = config.get("cycle_started_at", "").strip()
+        if cycle_started_at:
+            since = max(since, parse_datetime(cycle_started_at))
+        page_size = 20
+        action_cap = self._config_int(config, "max_action_pages_per_post") * page_size
+        mention_cap = self._config_int(config, "max_mention_pages") * page_size
+        source_pages = self._config_int(config, "max_source_pages")
+
+        before = self.twitter.request_count
+        posts: dict[str, Tweet] = {}
+        warnings: list[str] = []
+        for handle in (rules.primary_handle, rules.secondary_handle):
+            if not handle:
+                continue
+            try:
+                tweets, _ = await self.twitter.get_recent_tweets(
+                    handle, since=since, until=until, max_pages=source_pages
+                )
+            except TwitterApiError as exc:
+                warnings.append(f"Could not read @{handle}: {exc}")
+                continue
+            posts.update({tweet.tweet_id: tweet for tweet in tweets if not tweet.is_retweet})
+        estimate_requests = self.twitter.request_count - before
+
+        credit_per_item = 15
+        engagement_items = 0
+        for post in posts.values():
+            for count in (post.reply_count, post.quote_count, post.retweet_count):
+                engagement_items += max(1, min(count, action_cap))
+        source_credits = max(len(posts), estimate_requests) * credit_per_item
+        engagement_credits = engagement_items * credit_per_item
+        mentions_credits_max = mention_cap * credit_per_item * 2
+        low = source_credits + engagement_credits
+        high = low + mentions_credits_max
+        result = {
+            "period": period_label,
+            "since": isoformat(since),
+            "until": isoformat(until),
+            "source_posts": len(posts),
+            "engagement_items": engagement_items,
+            "source_credits": source_credits,
+            "engagement_credits": engagement_credits,
+            "mentions_credits_max": mentions_credits_max,
+            "credits_low": low,
+            "credits_high": high,
+            "usd_low": round(low / 100_000, 2),
+            "usd_high": round(high / 100_000, 2),
+            "estimate_requests": estimate_requests,
+            "warnings": warnings,
+            "computed_at": isoformat(until),
+            "cached": False,
+        }
+        self._estimate_cache[period_label] = (now_ts, result)
+        return result
 
     async def rescore_current_cycle(self, *, config: dict[str, str] | None = None) -> int:
         values = config or await self.repository.get_config()

@@ -151,6 +151,16 @@ def parse_tweet(record: dict[str, Any]) -> Tweet:
     )
     if not tweet_id:
         raise ValueError("twitterapi.io tweet payload did not include a tweet ID")
+
+    def _count(*keys: str) -> int:
+        value = deep_get(
+            raw, tuple((key,) for key in keys) + tuple(("legacy", key) for key in keys)
+        )
+        try:
+            return max(0, int(value or 0))
+        except (TypeError, ValueError):
+            return 0
+
     return Tweet(
         tweet_id=tweet_id,
         text=text,
@@ -162,6 +172,9 @@ def parse_tweet(record: dict[str, Any]) -> Tweet:
         reply_to_tweet_id=reply_to,
         quoted_tweet_id=quoted_id,
         is_retweet=is_retweet,
+        reply_count=_count("replyCount", "reply_count"),
+        quote_count=_count("quoteCount", "quote_count"),
+        retweet_count=_count("retweetCount", "retweet_count"),
     )
 
 

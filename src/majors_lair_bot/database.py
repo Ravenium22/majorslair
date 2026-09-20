@@ -507,8 +507,16 @@ class DatabaseRepository:
         cycle_id: str,
         discovered: list[EngagementAction],
         scopes: list[ReconcileScope],
+        ignore_discord_ids: set[str] | None = None,
     ) -> int:
+        """Merge freshly discovered actions into the cycle log.
+
+        Rows belonging to ``ignore_discord_ids`` (members deliberately left out of this
+        scan) are never deactivated, so skipping protected members freezes their history
+        instead of erasing it.
+        """
         now = utc_now()
+        ignored = ignore_discord_ids or set()
         discovered_keys = {action.action_key for action in discovered}
         complete_scopes = [scope for scope in scopes if scope.complete]
         changed = 0
@@ -521,6 +529,8 @@ class DatabaseRepository:
             indexed = {row.action_key: row for row in current_rows}
             for row in current_rows:
                 if not row.active or row.action_key in discovered_keys:
+                    continue
+                if row.discord_user_id in ignored:
                     continue
                 if any(self._scope_matches(row, scope) for scope in complete_scopes):
                     row.active = False

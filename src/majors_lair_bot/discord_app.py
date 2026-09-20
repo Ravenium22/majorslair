@@ -244,13 +244,20 @@ class EngagementCog(commands.Cog):
             )
         await interaction.followup.send(embed=embed, ephemeral=True)
 
-    async def _run_scan(self, interaction: discord.Interaction, period: str | None) -> None:
+    async def _run_scan(
+        self,
+        interaction: discord.Interaction,
+        period: str | None,
+        skip_protected: bool | None = None,
+    ) -> None:
         await interaction.response.defer(thinking=True)
         if period is None:
             config = await self.bot.repository.get_config()
             period = config.get("default_refresh_period", DEFAULT_CONFIG["default_refresh_period"])
         summary = await self.bot.service.scan(
-            period=period, actor_discord_id=str(interaction.user.id)
+            period=period,
+            actor_discord_id=str(interaction.user.id),
+            include_protected=None if skip_protected is None else not skip_protected,
         )
         approximate_cost = summary.tweets_returned * 0.00018
         embed = discord.Embed(
@@ -282,6 +289,11 @@ class EngagementCog(commands.Cog):
             value=(
                 f"Changed log entries: **{summary.changed_actions}**\n"
                 f"Incomplete capped scopes: **{summary.incomplete_scopes}**"
+                + (
+                    f"\nProtected members skipped: **{summary.skipped_protected}**"
+                    if summary.skipped_protected
+                    else ""
+                )
             ),
         )
         if summary.x_checked:
@@ -321,11 +333,22 @@ class EngagementCog(commands.Cog):
     @app_commands.command(
         name="check-engagement", description="Scan and score a chosen recent period"
     )
-    @app_commands.describe(period="Examples: 24h, 7d, 30d (maximum 31d)")
+    @app_commands.describe(
+        period="Examples: 24h, 7d, 30d (maximum 31d)",
+        skip_protected=(
+            "Leave special-role members out of scoring and X checks "
+            "(default: the skip_protected_members setting)"
+        ),
+    )
     @app_commands.guild_only()
     @admin_only()
-    async def check_engagement(self, interaction: discord.Interaction, period: str = "7d") -> None:
-        await self._run_scan(interaction, period)
+    async def check_engagement(
+        self,
+        interaction: discord.Interaction,
+        period: str = "7d",
+        skip_protected: bool | None = None,
+    ) -> None:
+        await self._run_scan(interaction, period, skip_protected)
 
     @app_commands.command(
         name="refresh-engagement", description="Run the configured short refresh scan"

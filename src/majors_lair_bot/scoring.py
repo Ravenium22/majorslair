@@ -19,6 +19,7 @@ DEFAULT_CONFIG: dict[str, str] = {
     "max_action_pages_per_post": "8",
     "max_mention_pages": "10",
     "low_activity_threshold": "5",
+    "skip_protected_members": "false",
     "blacklist": "lfg,gm,gn,alpha,bullish,fire,moon,send it,lets go,let's go",
     "reference_keywords": (
         "onchain,on-chain,dyor,liquidity,volume,holders,tokenomics,roadmap,thesis,data,research"
@@ -55,6 +56,10 @@ CONFIG_DESCRIPTIONS: dict[str, str] = {
     "max_action_pages_per_post": "Safety cap per replies/quotes/retweeters endpoint.",
     "max_mention_pages": "Safety cap per target account mention scan.",
     "low_activity_threshold": "Score at or below this appears in the low-activity report.",
+    "skip_protected_members": (
+        "true = scans neither score nor X-verify special-role members by default; "
+        "each scan can still override this."
+    ),
     "blacklist": "Comma-separated low-effort words/phrases.",
     "reference_keywords": "Comma-separated research/on-chain value signals.",
     "minimum_words": "Fewer normalized words is treated as low effort.",

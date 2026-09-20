@@ -16,12 +16,17 @@ export default function OverviewPage({ session }: { session: Session }) {
   const [skipProtected, setSkipProtected] = useState(false)
   const [starting, setStarting] = useState(false)
 
+  const [loadingEstimate, setLoadingEstimate] = useState(false)
+
   const openScan = async () => {
+    setLoadingEstimate(true)
     try {
-      setEstimate(await api<ScanEstimate>(`/api/scans/estimate?period=${encodeURIComponent(period)}`))
+      const next = await api<ScanEstimate>(`/api/scans/estimate?period=${encodeURIComponent(period)}`)
+      setSkipProtected(next.skip_protected_default)
+      setEstimate(next)
     } catch (error) {
       setNotice({ text: error instanceof Error ? error.message : 'Could not prepare the scan', kind: 'error' })
-    }
+    } finally { setLoadingEstimate(false) }
   }
 
   const scan = async () => {
@@ -39,6 +44,10 @@ export default function OverviewPage({ session }: { session: Session }) {
 
   const verifyCount = estimate ? estimate.linked_members - (skipProtected ? estimate.protected_linked : 0) : 0
   const verifyCredits = verifyX ? verifyCount * (estimate?.verification_credits_per_account ?? 10) : 0
+  const scanEstimate = estimate && !estimate.estimate.error ? estimate.estimate : undefined
+  const totalLow = (scanEstimate?.credits_low ?? 0) + verifyCredits
+  const totalHigh = (scanEstimate?.credits_high ?? 0) + verifyCredits
+  const usd = (credits: number) => `$${(credits / 100000).toFixed(2)}`
 
   const metrics = [
     { label: 'Linked members', value: data?.linked_members ?? 0, icon: Users, detail: 'Active accounts' },
@@ -88,7 +97,7 @@ export default function OverviewPage({ session }: { session: Session }) {
           <h2>Refresh the signal</h2>
           <p>Collect recent replies, quotes, retweets, and organic mentions from tracked accounts.</p>
           <label>Lookback window<select value={period} onChange={(event) => setPeriod(event.target.value)}><option value="24h">Last 24 hours</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option></select></label>
-          <button className="button primary" onClick={openScan} disabled={data?.last_scan?.status === 'running'}><Play size={17} />{data?.last_scan?.status === 'running' ? 'Scan running' : 'Run engagement scan'}</button>
+          <button className="button primary" onClick={openScan} disabled={data?.last_scan?.status === 'running' || loadingEstimate}><Play size={17} />{data?.last_scan?.status === 'running' ? 'Scan running' : loadingEstimate ? 'Estimating cost…' : 'Run engagement scan'}</button>
           <small><Clock3 size={13} /> Last completed {formatDate(data?.last_scan?.completed_at)}</small>
         </aside>
       </section>
@@ -96,13 +105,12 @@ export default function OverviewPage({ session }: { session: Session }) {
         <div className="modal-icon"><Play /></div><p className="eyebrow">Engagement scan</p><h2>Scan the {PERIOD_LABEL[period] ?? estimate.period}</h2>
         <p>The bot collects replies, quotes, retweets, and mentions on the tracked accounts' posts, then scores every linked member who shows up. Cost depends on how many posts and replies there are, not on the member count.</p>
         <dl className="estimate-grid">
-          <div><dt>Members who can score</dt><dd>{estimate.linked_members}<small>{estimate.protected_linked} protected</small></dd></div>
-          <div><dt>Members without X</dt><dd>{estimate.unlinked_members}<small>not scanned</small></dd></div>
-          <div><dt>Tracked posts on file</dt><dd>{estimate.tracked_posts}<small>new ones are discovered</small></dd></div>
-          <div><dt>Last {estimate.period} scan</dt><dd>{estimate.previous_scan?.credits != null ? `≈ ${estimate.previous_scan.credits.toLocaleString()} cr` : '—'}<small>{estimate.previous_scan ? `${estimate.previous_scan.discovered} actions · ${estimate.previous_scan.api_requests} requests · ≈ $${((estimate.previous_scan.credits ?? 0) / 100000).toFixed(2)}` : 'no previous scan of this window'}</small></dd></div>
+          <div><dt>Members who will be scored</dt><dd>{estimate.linked_members - (skipProtected ? estimate.protected_linked : 0)}<small>{skipProtected ? `${estimate.protected_linked} protected skipped` : `${estimate.protected_linked} of them protected`} · {estimate.unlinked_members} without X</small></dd></div>
+          <div><dt>Posts in this window</dt><dd>{scanEstimate ? scanEstimate.source_posts : '—'}<small>{scanEstimate ? `${scanEstimate.engagement_items.toLocaleString()} replies, quotes & retweets to read` : estimate.estimate.error ?? 'could not read the tracked accounts'}</small></dd></div>
+          <div className="wide"><dt>Estimated cost of this scan</dt><dd>{scanEstimate ? `≈ ${totalLow.toLocaleString()} – ${totalHigh.toLocaleString()} credits` : '—'}<small>{scanEstimate ? `${usd(totalLow)} – ${usd(totalHigh)} · posts & engagement ${scanEstimate.engagement_credits + scanEstimate.source_credits} cr · mentions up to ${scanEstimate.mentions_credits_max} cr · X checks ${verifyCredits} cr` : ''}{estimate.previous_scan?.credits != null ? ` · last ${estimate.period} scan actually cost ≈ ${estimate.previous_scan.credits.toLocaleString()} cr (${usd(estimate.previous_scan.credits)})` : ''}</small></dd></div>
         </dl>
+        <label className="check-row"><input type="checkbox" checked={skipProtected} onChange={(e) => setSkipProtected(e.target.checked)} disabled={starting} /> Skip protected members ({estimate.protected_linked}): not scored, not X-checked. Their existing points stay as they are.</label>
         <label className="check-row"><input type="checkbox" checked={verifyX} onChange={(e) => setVerifyX(e.target.checked)} disabled={starting} /> Verify X accounts during this scan ({verifyCount} accounts · ≈ {verifyCredits.toLocaleString()} credits)</label>
-        {verifyX && <label className="check-row nested"><input type="checkbox" checked={skipProtected} onChange={(e) => setSkipProtected(e.target.checked)} disabled={starting} /> Skip protected members ({estimate.protected_linked})</label>}
         <div className="modal-actions"><button type="button" className="button ghost" onClick={() => setEstimate(undefined)} disabled={starting}>Cancel</button><button className="button primary" onClick={scan} disabled={starting}><Play size={16} />{starting ? 'Starting…' : 'Start scan'}</button></div>
       </div></div>}
       <section className="panel scan-history">

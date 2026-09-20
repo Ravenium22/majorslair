@@ -201,3 +201,43 @@ async def test_verify_linked_accounts_flags_suspended_and_renames(
     twitter.get_users_by_ids = boom  # type: ignore[method-assign]
     failed = await service.verify_linked_accounts()
     assert failed["checked"] == 0 and "balance" in failed["error"]
+
+
+@pytest.mark.asyncio
+async def test_estimate_scan_sums_post_counters_and_caches(repository: DatabaseRepository) -> None:
+    from datetime import UTC, datetime
+
+    from majors_lair_bot.models import Tweet
+
+    class CountingTwitter(FakeTwitter):
+        calls = 0
+
+        async def get_recent_tweets(self, handle: str, **_: object) -> tuple[list[Tweet], bool]:
+            self.calls += 1
+            self.request_count += 1
+            now = datetime.now(UTC)
+            if handle != "m_m3l":
+                return [], True
+            return (
+                [
+                    Tweet("1", "a", "9", handle, now, reply_count=30, quote_count=2),
+                    Tweet("2", "b", "9", handle, now, reply_count=1000, retweet_count=5),
+                ],
+                True,
+            )
+
+    twitter = CountingTwitter({})
+    twitter.request_count = 0
+    service = EngagementService(repository, twitter)  # type: ignore[arg-type]
+
+    estimate = await service.estimate_scan("7d")
+
+    # cap = max_action_pages_per_post (8) * 20 = 160 items per endpoint
+    assert estimate["source_posts"] == 2
+    assert estimate["engagement_items"] == (30 + 2 + 1) + (160 + 1 + 5)
+    assert estimate["engagement_credits"] == estimate["engagement_items"] * 15
+    assert estimate["credits_high"] > estimate["credits_low"] > 0
+    assert estimate["cached"] is False and twitter.calls == 2
+
+    again = await service.estimate_scan("7d")
+    assert again["cached"] is True and twitter.calls == 2

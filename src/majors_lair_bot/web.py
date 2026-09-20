@@ -23,7 +23,7 @@ from .engagement import EngagementService
 from .scoring import DEFAULT_CONFIG, ScoringRules
 from .settings import Settings
 from .twitter_client import TwitterApiClient, TwitterApiError
-from .utils import parse_period
+from .utils import parse_bool, parse_period
 
 LOGGER = logging.getLogger(__name__)
 DISCORD_API = "https://discord.com/api/v10"
@@ -118,7 +118,7 @@ class VerifyRequest(BaseModel):
 class ScanRequest(BaseModel):
     period: str = Field(default="24h", min_length=2, max_length=10)
     verify_x: bool = True
-    skip_protected: bool = False
+    skip_protected: bool | None = None
 
 
 class TrackPostRequest(BaseModel):
@@ -688,7 +688,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         actor_id: str,
         *,
         verify_x: bool = True,
-        include_protected: bool = True,
+        include_protected: bool | None = None,
     ) -> None:
         try:
             await runtime.service.scan(
@@ -720,7 +720,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 payload.period,
                 actor_id,
                 verify_x=payload.verify_x,
-                include_protected=not payload.skip_protected,
+                include_protected=(
+                    None if payload.skip_protected is None else not payload.skip_protected
+                ),
             ),
             name=f"scan-{scan_id}",
         )
@@ -735,6 +737,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         users = await runtime.repository.list_users(active_only=True)
         linked = [user for user in users if user.twitter_user_id]
+        config_values = await runtime.repository.get_config()
+        skip_default = parse_bool(
+            config_values.get("skip_protected_members", DEFAULT_CONFIG["skip_protected_members"])
+        )
+        try:
+            estimate = await runtime.service.estimate_scan(period)
+        except TwitterApiError as exc:
+            estimate = {"error": str(exc)}
         previous = next(
             (
                 scan
@@ -759,6 +769,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "unlinked_members": len(users) - len(linked),
             "tracked_posts": len(await runtime.repository.list_tracked_posts(active_only=True)),
             "verification_credits_per_account": 10,
+            "skip_protected_default": skip_default,
+            "estimate": estimate,
             "previous_scan": (
                 {
                     "completed_at": previous.get("completed_at", ""),

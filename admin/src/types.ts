@@ -110,6 +110,22 @@ export type ScanEstimate = {
   unlinked_members: number
   tracked_posts: number
   verification_credits_per_account: number
+  skip_protected_default: boolean
+  estimate: {
+    source_posts: number
+    engagement_items: number
+    source_credits: number
+    engagement_credits: number
+    mentions_credits_max: number
+    credits_low: number
+    credits_high: number
+    usd_low: number
+    usd_high: number
+    estimate_requests: number
+    warnings: string[]
+    cached: boolean
+    error?: string
+  } & { error?: string }
   previous_scan: { completed_at: string; discovered: number; api_requests: number; items_returned: number; credits: number | null } | null
 }
 
