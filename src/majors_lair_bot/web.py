@@ -562,6 +562,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             for user in registry.values()
             if user.active and user.discord_user_id not in discord_ids
         ]
+        present = [user for user in registry.values() if user.discord_user_id in discord_ids]
+        present_active = sum(1 for user in present if user.active)
+        present_inactive = len(present) - present_active
+        final_registry = await runtime.repository.list_users()
+        registry_active = sum(1 for user in final_registry if user.active)
         await runtime.repository.append_audit(
             event_type="admin_members_synced",
             actor_discord_id=str(admin["discord_user_id"]),
@@ -576,6 +581,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "discord_members": len(members) - bots,
             "bots_skipped": bots,
             "already_registered": len(members) - bots - len(added),
+            "already_registered_active": present_active,
+            "already_registered_inactive": present_inactive,
+            "registry_active": registry_active,
+            "registry_inactive": len(final_registry) - registry_active,
             "added": added,
             "left_server": left,
         }

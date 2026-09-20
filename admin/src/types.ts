@@ -114,6 +114,10 @@ export type DiscordSyncResponse = {
   discord_members: number
   bots_skipped: number
   already_registered: number
+  already_registered_active: number
+  already_registered_inactive: number
+  registry_active: number
+  registry_inactive: number
   added: { discord_user_id: string; discord_username: string }[]
   left_server: { discord_user_id: string; discord_username: string }[]
 }

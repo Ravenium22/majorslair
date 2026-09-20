@@ -97,7 +97,7 @@ export default function MembersPage({ session }: { session: Session }) {
     try {
       const response = await mutateApi<DiscordSyncResponse>('/api/users/sync-discord', session.csrf_token, 'POST')
       setSyncResult(response)
-      setNotice({ text: `Discord sync: ${response.added.length} new members registered, ${response.already_registered} already present, ${response.bots_skipped} bots skipped.`, kind: 'success' })
+      setNotice({ text: `Discord sync: ${response.added.length} new members registered · ${response.already_registered_active} already present + ${response.already_registered_inactive} inactive · ${response.bots_skipped} bots skipped. Registry now ${response.registry_active} active + ${response.registry_inactive} inactive.`, kind: 'success' })
       await mutate()
     } catch (error) { setNotice({ text: error instanceof Error ? error.message : 'Discord sync failed', kind: 'error' }) }
     finally { setSyncing(false) }
@@ -198,7 +198,8 @@ export default function MembersPage({ session }: { session: Session }) {
 
     {syncResult && <div className="modal-backdrop" onMouseDown={() => setSyncResult(undefined)}><div className="modal modal-wide" onMouseDown={(e) => e.stopPropagation()}>
       <div className="modal-icon"><RefreshCw /></div><p className="eyebrow">Discord sync</p><h2>Server members compared with the registry</h2>
-      <p className="import-summary">{syncResult.discord_members} humans in the server · {syncResult.added.length} newly registered · {syncResult.already_registered} already present · {syncResult.bots_skipped} bots skipped · {syncResult.left_server.length} registered members no longer in the server.</p>
+      <p className="import-summary">{syncResult.discord_members} humans in the server · {syncResult.added.length} newly registered · {syncResult.already_registered_active} already present + {syncResult.already_registered_inactive} inactive · {syncResult.bots_skipped} bots skipped · {syncResult.left_server.length} registered members no longer in the server.</p>
+      <p className="import-summary">Registry now holds <strong>{syncResult.registry_active} active + {syncResult.registry_inactive} inactive</strong> members.</p>
       {syncResult.added.length > 0 && <><h3 className="sub-heading">Newly registered (no X yet)</h3><div className="table-wrap import-results"><table><tbody>{syncResult.added.map((row) => <tr key={row.discord_user_id}><td><span className="member-cell"><strong>{row.discord_username}</strong><small className="mono">{row.discord_user_id}</small></span></td></tr>)}</tbody></table></div></>}
       {syncResult.left_server.length > 0 && <><h3 className="sub-heading">In the registry but not in the server</h3><div className="table-wrap import-results"><table><tbody>{syncResult.left_server.map((row) => <tr key={row.discord_user_id}><td><span className="member-cell"><strong>{row.discord_username}</strong><small className="mono">{row.discord_user_id}</small></span></td></tr>)}</tbody></table></div></>}
       <div className="modal-actions"><button className="button primary" onClick={() => setSyncResult(undefined)}>Done</button></div>
