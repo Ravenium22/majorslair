@@ -5,7 +5,7 @@ import { api, formatDate, formatScore, mutateApi } from '../api'
 import { Empty, PageHeader, Status, Toast } from '../components'
 import type { Overview, ScanEstimate, Session } from '../types'
 
-const PERIOD_LABEL: Record<string, string> = { '24h': 'last 24 hours', '7d': 'last 7 days', '30d': 'last 30 days', '60d': 'last 60 days', '90d': 'last 90 days', '180d': 'last 180 days' }
+const PERIOD_LABEL: Record<string, string> = { '24h': 'last 24 hours', '7d': 'last 7 days', '30d': 'last 30 days', '60d': 'last 60 days', '90d': 'last 90 days', '180d': 'last 6 months', '365d': 'last 12 months' }
 
 export default function OverviewPage({ session }: { session: Session }) {
   const { data, mutate, isLoading } = useSWR<Overview>('/api/overview', api, { refreshInterval: 10000 })
@@ -96,7 +96,7 @@ export default function OverviewPage({ session }: { session: Session }) {
           <p className="eyebrow">Manual scan</p>
           <h2>Refresh the signal</h2>
           <p>Collect recent replies, quotes, retweets, and organic mentions from tracked accounts.</p>
-          <label>Lookback window<select value={period} onChange={(event) => setPeriod(event.target.value)}><option value="24h">Last 24 hours</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option><option value="60d">Last 60 days</option><option value="90d">Last 90 days</option><option value="180d">Last 180 days</option></select></label>
+          <label>Lookback window<select value={period} onChange={(event) => setPeriod(event.target.value)}><option value="24h">Last 24 hours</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option><option value="60d">Last 60 days</option><option value="90d">Last 90 days</option><option value="180d">Last 6 months</option><option value="365d">Last 12 months</option></select></label>
           <button className="button primary" onClick={openScan} disabled={data?.last_scan?.status === 'running' || loadingEstimate}><Play size={17} />{data?.last_scan?.status === 'running' ? 'Scan running' : loadingEstimate ? 'Estimating cost…' : 'Run engagement scan'}</button>
           <small><Clock3 size={13} /> Last completed {formatDate(data?.last_scan?.completed_at)}</small>
         </aside>

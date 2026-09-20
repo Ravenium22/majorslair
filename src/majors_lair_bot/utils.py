@@ -58,6 +58,7 @@ def parse_period(value: str) -> tuple[timedelta, str]:
         "month": "30d",
         "quarter": "90d",
         "halfyear": "180d",
+        "year": "365d",
     }
     raw = aliases.get(raw, raw)
     match = re.fullmatch(r"(\d{1,3})([hd])", raw)
@@ -65,8 +66,8 @@ def parse_period(value: str) -> tuple[timedelta, str]:
         raise ValueError("Period must look like 24h, 7d, 30d, or 90d")
     amount = int(match.group(1))
     duration = timedelta(hours=amount) if match.group(2) == "h" else timedelta(days=amount)
-    if duration < timedelta(hours=1) or duration > timedelta(days=180):
-        raise ValueError("Period must be between 1 hour and 180 days")
+    if duration < timedelta(hours=1) or duration > timedelta(days=366):
+        raise ValueError("Period must be between 1 hour and 366 days")
     return duration, raw
 
 

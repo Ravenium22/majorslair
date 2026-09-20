@@ -27,8 +27,9 @@ def test_period_validation() -> None:
     assert parse_period("24h") == (timedelta(hours=24), "24h")
     assert parse_period("90d") == (timedelta(days=90), "90d")
     assert parse_period("quarter") == (timedelta(days=90), "90d")
+    assert parse_period("year") == (timedelta(days=365), "365d")
     with pytest.raises(ValueError):
-        parse_period("200d")
+        parse_period("400d")
     with pytest.raises(ValueError):
         parse_period("30m")
 
