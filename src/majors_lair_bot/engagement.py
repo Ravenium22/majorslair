@@ -991,6 +991,7 @@ class EngagementService:
         scan_id: str | None = None,
         verify_x: bool = True,
         include_protected: bool | None = None,
+        read_timelines: bool | None = None,
     ) -> ScanSummary:
         """Run a scan. ``include_protected=None`` follows the skip_protected_members setting."""
         parse_period(period)
@@ -1012,6 +1013,7 @@ class EngagementService:
                 actor_discord_id=actor_discord_id,
                 verify_x=verify_x,
                 include_protected=include_protected,
+                read_timelines=read_timelines,
             )
             summary.scan_id = run_id
             await self.repository.finish_scan_run(run_id, summary=asdict(summary))
@@ -1027,6 +1029,7 @@ class EngagementService:
         actor_discord_id: str,
         verify_x: bool = True,
         include_protected: bool = True,
+        read_timelines: bool | None = None,
     ) -> ScanSummary:
         duration, period_label = parse_period(period)
         async with self._scan_lock:
@@ -1104,7 +1107,16 @@ class EngagementService:
                 cycle_id=cycle_id,
                 since=since,
                 until=until,
-                max_pages=self._config_int(config, "member_timeline_pages", minimum=0),
+                # Per-scan switch: on = 1 page per member, off = nothing, None = the setting.
+                max_pages=(
+                    self._config_int(config, "member_timeline_pages", minimum=0)
+                    if read_timelines is None
+                    else (
+                        max(1, self._config_int(config, "member_timeline_pages", minimum=0))
+                        if read_timelines
+                        else 0
+                    )
+                ),
                 users=users,
                 already_counted_tweet_ids=counted_ids,
                 summary=summary,
@@ -1296,6 +1308,11 @@ class EngagementService:
             "sweep_credits_max": sweep_credits_max,
             "timeline_credits_max": timeline_credits_max,
             "timeline_pages": timeline_pages,
+            "timeline_credits_if_enabled": linked_members
+            * max(1, timeline_pages)
+            * page_size
+            * credit_per_item,
+            "timeline_members": linked_members,
             "credits_low": low,
             "credits_high": high,
             "usd_low": round(low / 100_000, 2),

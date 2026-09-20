@@ -138,6 +138,8 @@ export type ScanEstimate = {
     sweep_credits_max: number
     timeline_credits_max: number
     timeline_pages: number
+    timeline_credits_if_enabled: number
+    timeline_members: number
     credits_low: number
     credits_high: number
     usd_low: number

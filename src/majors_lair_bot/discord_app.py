@@ -316,6 +316,7 @@ class EngagementCog(commands.Cog):
         interaction: discord.Interaction,
         period: str | None,
         skip_protected: bool | None = None,
+        read_timelines: bool | None = None,
     ) -> None:
         await interaction.response.defer(thinking=True)
         if period is None:
@@ -325,6 +326,7 @@ class EngagementCog(commands.Cog):
             period=period,
             actor_discord_id=str(interaction.user.id),
             include_protected=None if skip_protected is None else not skip_protected,
+            read_timelines=read_timelines,
         )
         approximate_cost = summary.tweets_returned * 0.00018
         embed = discord.Embed(
@@ -359,6 +361,17 @@ class EngagementCog(commands.Cog):
                 + (
                     f"\nProtected members skipped: **{summary.skipped_protected}**"
                     if summary.skipped_protected
+                    else ""
+                )
+                + (
+                    f"\nHidden replies via sweep: **{summary.swept_replies}**"
+                    if summary.swept_replies
+                    else ""
+                )
+                + (
+                    f"\nHidden replies via timelines: **{summary.timeline_replies}** "
+                    f"({summary.timeline_members_checked} members read)"
+                    if summary.timeline_members_checked
                     else ""
                 )
             ),
@@ -406,6 +419,10 @@ class EngagementCog(commands.Cog):
             "Leave special-role members out of scoring and X checks "
             "(default: the skip_protected_members setting)"
         ),
+        read_timelines=(
+            "Also read every member's own timeline to catch replies X hides "
+            "(about 300 credits per member; default: the member_timeline_pages setting)"
+        ),
     )
     @app_commands.guild_only()
     @admin_only()
@@ -414,8 +431,9 @@ class EngagementCog(commands.Cog):
         interaction: discord.Interaction,
         period: str = "7d",
         skip_protected: bool | None = None,
+        read_timelines: bool | None = None,
     ) -> None:
-        await self._run_scan(interaction, period, skip_protected)
+        await self._run_scan(interaction, period, skip_protected, read_timelines)
 
     @app_commands.command(
         name="refresh-engagement", description="Run the configured short refresh scan"

@@ -132,6 +132,7 @@ class ScanRequest(BaseModel):
     period: str = Field(default="24h", min_length=2, max_length=10)
     verify_x: bool = True
     skip_protected: bool | None = None
+    read_timelines: bool | None = None
 
 
 class TrackPostRequest(BaseModel):
@@ -908,6 +909,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         *,
         verify_x: bool = True,
         include_protected: bool | None = None,
+        read_timelines: bool | None = None,
     ) -> None:
         try:
             await runtime.service.scan(
@@ -917,6 +919,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 scan_id=scan_id,
                 verify_x=verify_x,
                 include_protected=include_protected,
+                read_timelines=read_timelines,
             )
         except Exception:
             LOGGER.exception("Admin-triggered scan %s failed", scan_id)
@@ -942,6 +945,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 include_protected=(
                     None if payload.skip_protected is None else not payload.skip_protected
                 ),
+                read_timelines=payload.read_timelines,
             ),
             name=f"scan-{scan_id}",
         )

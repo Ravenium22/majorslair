@@ -19,6 +19,7 @@ export default function OverviewPage({ session }: { session: Session }) {
   const [estimate, setEstimate] = useState<ScanEstimate>()
   const [verifyX, setVerifyX] = useState(true)
   const [skipProtected, setSkipProtected] = useState(false)
+  const [readTimelines, setReadTimelines] = useState(false)
   const [starting, setStarting] = useState(false)
 
   const [loadingEstimate, setLoadingEstimate] = useState(false)
@@ -28,6 +29,7 @@ export default function OverviewPage({ session }: { session: Session }) {
     try {
       const next = await api<ScanEstimate>(`/api/scans/estimate?period=${encodeURIComponent(period)}`)
       setSkipProtected(next.skip_protected_default)
+      setReadTimelines(false)
       setEstimate(next)
     } catch (error) {
       setNotice({ text: error instanceof Error ? error.message : 'Could not prepare the scan', kind: 'error' })
@@ -38,7 +40,7 @@ export default function OverviewPage({ session }: { session: Session }) {
     setStarting(true)
     setNotice({ text: `Starting ${period} engagement scan…`, kind: 'loading' })
     try {
-      await mutateApi('/api/scans', session.csrf_token, 'POST', { period, verify_x: verifyX, skip_protected: skipProtected })
+      await mutateApi('/api/scans', session.csrf_token, 'POST', { period, verify_x: verifyX, skip_protected: skipProtected, read_timelines: readTimelines })
       setEstimate(undefined)
       setNotice({ text: 'Scan queued. Results will appear here automatically.', kind: 'success' })
       await mutate()
@@ -50,8 +52,9 @@ export default function OverviewPage({ session }: { session: Session }) {
   const verifyCount = estimate ? estimate.linked_members - (skipProtected ? estimate.protected_linked : 0) : 0
   const verifyCredits = verifyX ? verifyCount * (estimate?.verification_credits_per_account ?? 10) : 0
   const scanEstimate = estimate && !estimate.estimate.error ? estimate.estimate : undefined
-  const totalLow = (scanEstimate?.credits_low ?? 0) + verifyCredits
-  const totalHigh = (scanEstimate?.credits_high ?? 0) + verifyCredits
+  const timelineCredits = readTimelines && scanEstimate ? scanEstimate.timeline_credits_if_enabled : 0
+  const totalLow = (scanEstimate?.credits_low ?? 0) - (scanEstimate?.timeline_pages ? 0 : 0) + verifyCredits + timelineCredits
+  const totalHigh = (scanEstimate?.credits_high ?? 0) - (scanEstimate?.timeline_credits_max ?? 0) + verifyCredits + timelineCredits
   const usd = (credits: number) => `$${(credits / 100000).toFixed(2)}`
 
   const metrics = [
@@ -113,11 +116,12 @@ export default function OverviewPage({ session }: { session: Session }) {
         <dl className="estimate-grid">
           <div><dt>Members who will be scored</dt><dd>{estimate.linked_members - (skipProtected ? estimate.protected_linked : 0)}<small>{skipProtected ? `${estimate.protected_linked} protected skipped` : `${estimate.protected_linked} of them protected`} · {estimate.unlinked_members} without X</small></dd></div>
           <div><dt>Posts in this window</dt><dd>{scanEstimate ? scanEstimate.source_posts : '—'}<small>{scanEstimate ? `${scanEstimate.engagement_items.toLocaleString()} replies, quotes & retweets to read` : estimate.estimate.error ?? 'could not read the tracked accounts'}</small></dd></div>
-          <div className="wide"><dt>Estimated cost of this scan</dt><dd>{scanEstimate ? `≈ ${totalLow.toLocaleString()} – ${totalHigh.toLocaleString()} credits` : '—'}<small>{scanEstimate ? `${usd(totalLow)} – ${usd(totalHigh)} · posts & engagement ${scanEstimate.engagement_credits + scanEstimate.source_credits} cr · mentions up to ${scanEstimate.mentions_credits_max} cr · hidden-reply sweep up to ${scanEstimate.sweep_credits_max} cr${scanEstimate.timeline_pages ? ` · member timelines up to ${scanEstimate.timeline_credits_max} cr` : ''} · X checks ${verifyCredits} cr` : ''}{estimate.previous_scan?.credits != null ? ` · last ${estimate.period} scan actually cost ≈ ${estimate.previous_scan.credits.toLocaleString()} cr (${usd(estimate.previous_scan.credits)})` : ''}</small></dd></div>
+          <div className="wide"><dt>Estimated cost of this scan</dt><dd>{scanEstimate ? `≈ ${totalLow.toLocaleString()} – ${totalHigh.toLocaleString()} credits` : '—'}<small>{scanEstimate ? `${usd(totalLow)} – ${usd(totalHigh)} · posts & engagement ${scanEstimate.engagement_credits + scanEstimate.source_credits} cr · mentions up to ${scanEstimate.mentions_credits_max} cr · hidden-reply sweep up to ${scanEstimate.sweep_credits_max} cr${readTimelines ? ` · member timelines ≈ ${timelineCredits.toLocaleString()} cr` : ''} · X checks ${verifyCredits} cr` : ''}{estimate.previous_scan?.credits != null ? ` · last ${estimate.period} scan actually cost ≈ ${estimate.previous_scan.credits.toLocaleString()} cr (${usd(estimate.previous_scan.credits)})` : ''}</small></dd></div>
         </dl>
         {scanEstimate?.warnings.length ? <p className="estimate-warning">{scanEstimate.warnings.join(' ')}</p> : null}
         <label className="check-row"><input type="checkbox" checked={skipProtected} onChange={(e) => setSkipProtected(e.target.checked)} disabled={starting} /> Skip protected members ({estimate.protected_linked}): not scored, not X-checked. Their existing points stay as they are.</label>
         <label className="check-row"><input type="checkbox" checked={verifyX} onChange={(e) => setVerifyX(e.target.checked)} disabled={starting} /> Verify X accounts during this scan ({verifyCount} accounts · ≈ {verifyCredits.toLocaleString()} credits)</label>
+        <label className="check-row"><input type="checkbox" checked={readTimelines} onChange={(e) => setReadTimelines(e.target.checked)} disabled={starting} /> Deep check: also read every member's own timeline to catch replies X hides everywhere else ({scanEstimate?.timeline_members ?? 0} members · ≈ {(scanEstimate?.timeline_credits_if_enabled ?? 0).toLocaleString()} credits ≈ {usd(scanEstimate?.timeline_credits_if_enabled ?? 0)}). Off again next time.</label>
         <div className="modal-actions"><button type="button" className="button ghost" onClick={() => setEstimate(undefined)} disabled={starting}>Cancel</button><button className="button primary" onClick={scan} disabled={starting}><Play size={16} />{starting ? 'Starting…' : 'Start scan'}</button></div>
       </div></div>}
       <section className="panel scan-history">
