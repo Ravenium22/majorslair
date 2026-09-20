@@ -189,6 +189,11 @@ async def test_verify_linked_accounts_flags_suspended_and_renames(
     report = await repository.low_activity(5)
     assert {u.discord_user_id for u in report} == {"1", "2", "3", "4"}
 
+    # Protected members can be left out of an on-demand check.
+    await repository.set_special_role("1", special_role=True, special_role_names="Team")
+    scoped = await service.verify_linked_accounts(include_protected=False)
+    assert scoped["checked"] == 2 and scoped["include_protected"] is False
+
     # A twitterapi.io failure is reported, not raised.
     async def boom(_: list[str]) -> dict[str, dict[str, Any]]:
         raise TwitterApiError("balance empty", status=402, path="/x")

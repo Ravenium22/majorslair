@@ -105,6 +105,7 @@ export type ImportResponse = { summary: Partial<Record<ImportStatus, number>>; r
 
 export type VerifyResponse = {
   checked: number
+  include_protected: boolean
   unavailable: { discord_user_id: string; discord_username: string; twitter_handle: string; status: string; reason: string }[]
   renamed: { discord_user_id: string; discord_username: string; old_handle: string; new_handle: string }[]
 }

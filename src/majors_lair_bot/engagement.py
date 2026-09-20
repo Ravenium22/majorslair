@@ -149,20 +149,30 @@ class EngagementService:
         return results
 
     async def verify_linked_accounts(
-        self, *, actor_discord_id: str = "", summary: ScanSummary | None = None
+        self,
+        *,
+        actor_discord_id: str = "",
+        summary: ScanSummary | None = None,
+        include_protected: bool = True,
     ) -> dict[str, Any]:
-        """Check every linked X account by its stable ID.
+        """Check linked X accounts by their stable ID.
 
         Suspended or deleted accounts are flagged on the member, renamed accounts get their
         handle updated automatically, and the outcome is written to ``summary`` when a scan
-        is running. A twitterapi.io failure becomes a warning instead of failing the scan.
+        is running. ``include_protected=False`` leaves special-role members out. A
+        twitterapi.io failure becomes a warning instead of failing the scan.
         """
         users = [
             user
             for user in await self.repository.list_users(active_only=True)
-            if user.twitter_user_id
+            if user.twitter_user_id and (include_protected or not user.special_role)
         ]
-        outcome: dict[str, Any] = {"checked": 0, "unavailable": [], "renamed": []}
+        outcome: dict[str, Any] = {
+            "checked": 0,
+            "unavailable": [],
+            "renamed": [],
+            "include_protected": include_protected,
+        }
         if not users:
             return outcome
         try:
@@ -223,6 +233,7 @@ class EngagementService:
                 "checked": len(users),
                 "unavailable": len(outcome["unavailable"]),
                 "renamed": len(outcome["renamed"]),
+                "include_protected": include_protected,
             },
         )
         return outcome

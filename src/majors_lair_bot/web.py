@@ -111,6 +111,10 @@ class ImportRequest(BaseModel):
     rows: list[ImportRow] = Field(min_length=1, max_length=500)
 
 
+class VerifyRequest(BaseModel):
+    skip_protected: bool = False
+
+
 class ScanRequest(BaseModel):
     period: str = Field(default="24h", min_length=2, max_length=10)
 
@@ -382,9 +386,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     @app.post("/api/users/verify-x")
-    async def verify_x_accounts(admin: MutatingAdmin) -> dict[str, Any]:
+    async def verify_x_accounts(
+        admin: MutatingAdmin, payload: VerifyRequest | None = None
+    ) -> dict[str, Any]:
+        options = payload or VerifyRequest()
         outcome = await runtime.service.verify_linked_accounts(
-            actor_discord_id=str(admin["discord_user_id"])
+            actor_discord_id=str(admin["discord_user_id"]),
+            include_protected=not options.skip_protected,
         )
         if outcome.get("error"):
             raise HTTPException(status_code=502, detail=str(outcome["error"]))

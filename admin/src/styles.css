@@ -157,3 +157,5 @@ td a { font-weight: 600; }.scan-history { margin-bottom: 22px; }
 .sub-heading { margin: 16px 0 0; color: var(--amber); font: 600 10px "Cascadia Mono", Consolas, monospace; letter-spacing: .08em; text-transform: uppercase; }
 td .muted { color: var(--muted); }
 .issue-link { color: var(--red); text-decoration: none; }
+.check-row { display: flex !important; align-items: center; gap: 10px; margin-top: 18px !important; text-transform: none !important; letter-spacing: 0 !important; font-size: 13px !important; color: var(--text) !important; cursor: pointer; }
+.check-row input { width: 16px; min-height: 0; height: 16px; margin: 0; accent-color: var(--amber); }

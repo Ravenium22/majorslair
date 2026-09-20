@@ -32,6 +32,8 @@ export default function MembersPage({ session }: { session: Session }) {
   const [syncResult, setSyncResult] = useState<DiscordSyncResponse>()
   const [verifying, setVerifying] = useState(false)
   const [verifyResult, setVerifyResult] = useState<VerifyResponse>()
+  const [verifyPlan, setVerifyPlan] = useState<{ linked: number; protectedLinked: number }>()
+  const [skipProtected, setSkipProtected] = useState(false)
   const [notice, setNotice] = useState<{ text: string; kind: 'success' | 'error' }>()
   const query = useMemo(() => new URLSearchParams({
     search, page: String(page), page_size: '25',
@@ -101,10 +103,21 @@ export default function MembersPage({ session }: { session: Session }) {
     finally { setSyncing(false) }
   }
 
+  const openVerify = async () => {
+    try {
+      const [all, prot] = await Promise.all([
+        api<Paginated<LinkedUser>>('/api/users?active=true&linked=true&page_size=1'),
+        api<Paginated<LinkedUser>>('/api/users?active=true&linked=true&protected=true&page_size=1'),
+      ])
+      setVerifyPlan({ linked: all.total, protectedLinked: prot.total })
+    } catch (error) { setNotice({ text: error instanceof Error ? error.message : 'Could not count members', kind: 'error' }) }
+  }
+
   const runVerify = async () => {
     setVerifying(true)
     try {
-      const response = await mutateApi<VerifyResponse>('/api/users/verify-x', session.csrf_token, 'POST')
+      const response = await mutateApi<VerifyResponse>('/api/users/verify-x', session.csrf_token, 'POST', { skip_protected: skipProtected })
+      setVerifyPlan(undefined)
       setVerifyResult(response)
       setNotice({ text: `Checked ${response.checked} X accounts: ${response.unavailable.length} suspended or gone, ${response.renamed.length} renamed and updated.`, kind: 'success' })
       await mutate()
@@ -117,7 +130,7 @@ export default function MembersPage({ session }: { session: Session }) {
 
   return <div className="page">
     <PageHeader eyebrow="Community registry" title="Linked members" copy="Everyone in the community, with or without an X account. Protected members never appear in the low-activity report." actions={<>
-      <button className="button" onClick={runVerify} disabled={verifying} title="Check every linked X account for suspensions, deletions, and renames (about 10 credits each)"><BadgeCheck size={17} className={verifying ? 'spin' : ''} /> {verifying ? 'Checking X…' : 'Verify X accounts'}</button>
+      <button className="button" onClick={openVerify} disabled={verifying} title="Check linked X accounts for suspensions, deletions, and renames (about 10 credits each)"><BadgeCheck size={17} className={verifying ? 'spin' : ''} /> {verifying ? 'Checking X…' : 'Verify X accounts'}</button>
       <button className="button" onClick={runSync} disabled={syncing} title="Register every human member of the Discord server who is missing here"><RefreshCw size={17} className={syncing ? 'spin' : ''} /> {syncing ? 'Syncing…' : 'Sync from Discord'}</button>
       <button className="button" onClick={() => setShowImport(true)}><FileUp size={17} /> Import CSV</button>
       <button className="button primary" onClick={() => setShowLink(true)}><Plus size={17} /> Link member</button>
@@ -166,9 +179,17 @@ export default function MembersPage({ session }: { session: Session }) {
       </>}
     </div></div>}
 
+    {verifyPlan && <div className="modal-backdrop" onMouseDown={() => { if (!verifying) setVerifyPlan(undefined) }}><div className="modal" onMouseDown={(e) => e.stopPropagation()}>
+      <div className="modal-icon"><BadgeCheck /></div><p className="eyebrow">X verification</p><h2>Check linked X accounts</h2>
+      <p>Each account is looked up on X by its stable ID. Suspended or deleted accounts get flagged, renamed accounts get their handle updated. About 10 twitterapi.io credits per account.</p>
+      <label className="check-row"><input type="checkbox" checked={skipProtected} onChange={(e) => setSkipProtected(e.target.checked)} disabled={verifying} /> Skip protected members ({verifyPlan.protectedLinked} linked)</label>
+      <p className="import-summary">Will check <strong>{verifyPlan.linked - (skipProtected ? verifyPlan.protectedLinked : 0)}</strong> accounts · about {(verifyPlan.linked - (skipProtected ? verifyPlan.protectedLinked : 0)) * 10} credits.</p>
+      <div className="modal-actions"><button type="button" className="button ghost" onClick={() => setVerifyPlan(undefined)} disabled={verifying}>Cancel</button><button className="button primary" onClick={runVerify} disabled={verifying || verifyPlan.linked - (skipProtected ? verifyPlan.protectedLinked : 0) === 0}>{verifying ? 'Checking X…' : 'Start check'}</button></div>
+    </div></div>}
+
     {verifyResult && <div className="modal-backdrop" onMouseDown={() => setVerifyResult(undefined)}><div className="modal modal-wide" onMouseDown={(e) => e.stopPropagation()}>
       <div className="modal-icon"><BadgeCheck /></div><p className="eyebrow">X verification</p><h2>Linked X accounts checked</h2>
-      <p className="import-summary">{verifyResult.checked} accounts checked · {verifyResult.unavailable.length} suspended or gone · {verifyResult.renamed.length} renamed and updated automatically.</p>
+      <p className="import-summary">{verifyResult.checked} accounts checked{verifyResult.include_protected ? '' : ' (protected members skipped)'} · {verifyResult.unavailable.length} suspended or gone · {verifyResult.renamed.length} renamed and updated automatically.</p>
       {verifyResult.unavailable.length > 0 && <><h3 className="sub-heading">Could not verify</h3><div className="table-wrap import-results"><table><tbody>{verifyResult.unavailable.map((row) => <tr key={row.discord_user_id}><td><span className="member-cell"><strong>{row.discord_username}</strong><small className="mono">{row.discord_user_id}</small></span></td><td><a href={`https://x.com/${row.twitter_handle}`} target="_blank">@{row.twitter_handle}</a></td><td><span className="status failed"><i />{row.status}</span></td><td className="muted">{row.reason}</td></tr>)}</tbody></table></div></>}
       {verifyResult.renamed.length > 0 && <><h3 className="sub-heading">Renamed on X</h3><div className="table-wrap import-results"><table><tbody>{verifyResult.renamed.map((row) => <tr key={row.discord_user_id}><td><span className="member-cell"><strong>{row.discord_username}</strong><small className="mono">{row.discord_user_id}</small></span></td><td className="muted">@{row.old_handle} → <a href={`https://x.com/${row.new_handle}`} target="_blank">@{row.new_handle}</a></td></tr>)}</tbody></table></div></>}
       {!verifyResult.unavailable.length && !verifyResult.renamed.length && <p className="import-summary">Every linked account is alive and still uses the handle on file.</p>}
