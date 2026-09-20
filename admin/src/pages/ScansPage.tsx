@@ -15,15 +15,13 @@ function credits(summary: ScanRun['summary']) {
   return Math.max(items, requests) * 15 + checked * 10
 }
 
-const csvCell = (value: unknown) => { const text = String(value ?? ''); return /[",
-]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text }
+const csvCell = (value: unknown) => { const text = String(value ?? ''); return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text }
 
 function downloadStandings(run: ScanRun) {
   const rows = run.summary.standings ?? []
   const header = ['rank', 'discord_username', 'discord_id', 'x_handle', 'points', 'points_before_scan', 'change', 'protected', 'x_status']
   const lines = rows.map((row, index) => [index + 1, row.discord_username, row.discord_user_id, row.twitter_handle, row.score, row.before, +(row.score - row.before).toFixed(2), row.special_role ? 'YES' : 'NO', row.x_status || 'ok'].map(csvCell).join(','))
-  const blob = new Blob(['﻿' + [header.join(','), ...lines].join('
-')], { type: 'text/csv;charset=utf-8' })
+  const blob = new Blob(['﻿' + [header.join(','), ...lines].join('\r\n')], { type: 'text/csv;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
   anchor.href = url
