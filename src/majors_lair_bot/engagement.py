@@ -764,7 +764,10 @@ class EngagementService:
                     action_url=post.url,
                     text="",
                     has_media=False,
-                    occurred_at=until,
+                    # X does not expose when a retweet happened. Dating it at the post's own
+                    # time keeps a long scan from piling every retweet onto one day, which
+                    # would trip the daily cap and mis-place them in windowed leaderboards.
+                    occurred_at=max(post.created_at, since),
                 )
             )
         return actions, scopes
