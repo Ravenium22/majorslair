@@ -25,8 +25,12 @@ def test_handle_and_status_url_normalization() -> None:
 def test_period_validation() -> None:
     assert parse_period("week") == (timedelta(days=7), "7d")
     assert parse_period("24h") == (timedelta(hours=24), "24h")
+    assert parse_period("90d") == (timedelta(days=90), "90d")
+    assert parse_period("quarter") == (timedelta(days=90), "90d")
     with pytest.raises(ValueError):
-        parse_period("90d")
+        parse_period("200d")
+    with pytest.raises(ValueError):
+        parse_period("30m")
 
 
 def test_text_normalization_removes_links_mentions_and_emoji() -> None:
