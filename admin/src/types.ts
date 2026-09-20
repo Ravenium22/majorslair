@@ -177,3 +177,16 @@ export type Snapshot = {
   reset_by_discord_id: string
   members: { rank: number; discord_user_id: string; discord_username: string; twitter_handle: string; score: number }[]
 }
+
+export type Diagnosis = {
+  tweet_id: string
+  findings: string[]
+  tweet?: { author_handle: string; author_id: string; created_at: string; text: string; is_reply: boolean; reply_to_tweet_id: string; quoted_tweet_id: string; is_retweet: boolean; url: string }
+  member?: LinkedUser | null
+  actions: (Action & { action_tweet_id: string; source_post_id: string })[]
+  score_preview?: { points: number; reason: string }
+  parent?: { tweet_id: string; author_handle: string; created_at: string; url: string; tracked: boolean; reply_count: number | null }
+  reply_endpoint?: { found: boolean; returned: number; complete: boolean }
+  sweep?: { found: boolean; returned: number; complete: boolean }
+}
+

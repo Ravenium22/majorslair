@@ -103,7 +103,7 @@ function Shell({ session, children }: { session: Session; children: ReactNode })
   const page = (() => {
     switch (route) {
       case 'members': return <MembersPage session={session} />
-      case 'activity': return <ActivityPage />
+      case 'activity': return <ActivityPage session={session} />
       case 'posts': return <PostsPage session={session} />
       case 'scans': return <ScansPage />
       case 'scoring': return <ScoringPage session={session} />

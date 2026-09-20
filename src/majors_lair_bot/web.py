@@ -124,6 +124,10 @@ class VerifyRequest(BaseModel):
     skip_protected: bool = False
 
 
+class DiagnoseRequest(BaseModel):
+    url: str = Field(min_length=5, max_length=300)
+
+
 class ScanRequest(BaseModel):
     period: str = Field(default="24h", min_length=2, max_length=10)
     verify_x: bool = True
@@ -807,6 +811,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             page=page,
             page_size=page_size,
         )
+
+    @app.post("/api/diagnose")
+    async def diagnose(payload: DiagnoseRequest, admin: MutatingAdmin) -> dict[str, Any]:
+        """Why is this tweet (not) counted? Checks linking, the log, and every fetch path."""
+        try:
+            outcome = await runtime.service.diagnose_tweet(payload.url)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except TwitterApiError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        await runtime.repository.append_audit(
+            event_type="tweet_diagnosed",
+            actor_discord_id=str(admin["discord_user_id"]),
+            details={"tweet_id": outcome.get("tweet_id", ""), "findings": outcome["findings"]},
+        )
+        return outcome
 
     @app.get("/api/audit")
     async def audit(

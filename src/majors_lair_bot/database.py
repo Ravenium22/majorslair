@@ -1005,6 +1005,17 @@ class DatabaseRepository:
             row.summary = summary or {}
             row.error = error[:4000]
 
+    async def actions_for_tweet(self, tweet_id: str) -> list[EngagementAction]:
+        """Every logged action (any cycle) whose own tweet id or source post is ``tweet_id``."""
+        statement = (
+            select(ActionRow)
+            .where(or_(ActionRow.action_tweet_id == tweet_id, ActionRow.source_post_id == tweet_id))
+            .order_by(ActionRow.occurred_at.desc())
+        )
+        async with self.sessions() as session:
+            rows = (await session.scalars(statement)).all()
+        return [self._action_from_row(row) for row in rows]
+
     async def list_snapshots(self) -> list[dict[str, Any]]:
         """Every leaderboard reset, newest first, with the full standings it froze."""
         statement = select(HistoricalSnapshotRow).order_by(

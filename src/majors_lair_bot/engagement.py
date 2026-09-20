@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from .database import DatabaseRepository, LinkConflictError
@@ -149,6 +149,178 @@ class EngagementService:
             details={"rows": len(rows), **counts},
         )
         return results
+
+    async def diagnose_tweet(self, url_or_id: str) -> dict[str, Any]:
+        """Explain why a tweet is or is not counted, checking every path the scan uses.
+
+        Costs a handful of twitterapi.io requests. Returns plain-language findings plus the
+        raw facts so an admin can see whether the miss is matching, filtering, or scoring.
+        """
+        raw_value = url_or_id.strip()
+        tweet_id = raw_value if raw_value.isdigit() else parse_status_url(raw_value)
+        findings: list[str] = []
+        result: dict[str, Any] = {"tweet_id": tweet_id, "findings": findings}
+        config = await self.repository.get_config()
+        rules = ScoringRules.from_mapping(config)
+        targets = {rules.primary_handle, rules.secondary_handle} - {""}
+
+        tweets = await self.twitter.get_tweets([tweet_id])
+        if not tweets:
+            findings.append(
+                "X returned nothing for this id: the tweet is deleted, the account is "
+                "suspended or private, or the id is wrong."
+            )
+            return result
+        tweet = tweets[0]
+        result["tweet"] = {
+            "author_handle": tweet.author_handle,
+            "author_id": tweet.author_id,
+            "created_at": isoformat(tweet.created_at),
+            "text": tweet.text,
+            "is_reply": tweet.is_reply,
+            "reply_to_tweet_id": tweet.reply_to_tweet_id,
+            "quoted_tweet_id": tweet.quoted_tweet_id,
+            "is_retweet": tweet.is_retweet,
+            "url": tweet.url,
+        }
+
+        users = await self.repository.list_users(active_only=True)
+        by_id, by_handle = self._user_indexes(users)
+        member = self._match_user(tweet.author_id, tweet.author_handle, by_id, by_handle)
+        result["member"] = asdict(member) if member else None
+        if member is None:
+            findings.append(
+                f"@{tweet.author_handle} is not linked to any active member (stable X id "
+                f"{tweet.author_id}). Nothing by this account can score until they run "
+                "/link-twitter or an admin links them."
+            )
+        elif member.special_role:
+            findings.append(
+                f"Author is linked to {member.discord_username} and is a protected member. "
+                "Scans run with 'skip protected' leave them unscored."
+            )
+        else:
+            findings.append(f"Author is linked to {member.discord_username}.")
+
+        logged = await self.repository.actions_for_tweet(tweet_id)
+        result["actions"] = [asdict(action) for action in logged]
+        own = [a for a in logged if a.action_tweet_id == tweet_id]
+        if own:
+            for action in own:
+                findings.append(
+                    f"Logged as a {action.action_type.value} on @{action.target_handle}: "
+                    f"{action.points:g} points ({action.reason})"
+                    + ("" if action.active else " [inactive]")
+                )
+        else:
+            findings.append("This tweet id is not in the actions log for any cycle.")
+
+        # Scoring preview, independent of whether it was matched.
+        if member is not None and (tweet.is_reply or tweet.quoted_tweet_id):
+            preview = self._make_action(
+                cycle_id="preview",
+                user=member,
+                action_type=ActionType.QUOTE if tweet.quoted_tweet_id else ActionType.REPLY,
+                target_handle=next(iter(targets), ""),
+                source_post_id=tweet.reply_to_tweet_id or tweet.quoted_tweet_id,
+                action_tweet_id=tweet.tweet_id,
+                action_url=tweet.url,
+                text=tweet.text,
+                has_media=tweet.has_media,
+                occurred_at=tweet.created_at,
+            )
+            points, reason = ScoringEngine(rules).score_one(preview)
+            result["score_preview"] = {"points": points, "reason": reason}
+            findings.append(f"If matched today it would score {points:g} points: {reason}.")
+
+        parent_id = tweet.reply_to_tweet_id
+        if not parent_id:
+            findings.append(
+                "This is not a reply. Standalone posts only count as mentions when they "
+                "mention a tracked account."
+            )
+            return result
+
+        parents = await self.twitter.get_tweets([parent_id])
+        parent = parents[0] if parents else None
+        tracked = {
+            post["tweet_id"] for post in await self.repository.list_tracked_posts(active_only=False)
+        }
+        result["parent"] = {
+            "tweet_id": parent_id,
+            "author_handle": parent.author_handle if parent else "",
+            "created_at": isoformat(parent.created_at) if parent else "",
+            "url": parent.url if parent else f"https://x.com/i/status/{parent_id}",
+            "tracked": parent_id in tracked,
+            "reply_count": parent.reply_count if parent else None,
+        }
+        if parent is None:
+            findings.append("The parent post could not be fetched (deleted or private).")
+            return result
+        if parent.author_handle not in targets:
+            findings.append(
+                f"The parent post is by @{parent.author_handle}, which is not a tracked "
+                f"account ({', '.join('@' + t for t in sorted(targets))}). Replies to other "
+                "accounts never score."
+            )
+            return result
+        if parent_id not in tracked:
+            findings.append(
+                "The parent post is by a tracked account but has never been fetched by a scan: "
+                "no scan window included its date, or the source page cap was reached. It is "
+                "only reachable through the reply sweep."
+            )
+
+        window_since = tweet.created_at - timedelta(days=1)
+        window_until = tweet.created_at + timedelta(days=1)
+        replies = await self.twitter.get_replies(
+            parent_id,
+            since=window_since,
+            until=window_until,
+            max_pages=self._config_int(config, "max_action_pages_per_post"),
+        )
+        reply_ids = set()
+        for raw in replies.items:
+            try:
+                reply_ids.add(parse_tweet(raw).tweet_id)
+            except (TypeError, ValueError):
+                continue
+        in_reply_list = tweet_id in reply_ids
+        result["reply_endpoint"] = {
+            "found": in_reply_list,
+            "returned": len(reply_ids),
+            "complete": replies.complete,
+        }
+        findings.append(
+            "The parent's reply list returned this reply."
+            if in_reply_list
+            else f"The parent's reply list does NOT include this reply ({len(reply_ids)} "
+            "replies returned). X hides low-quality replies from that list."
+        )
+
+        sweep = await self.twitter.search_replies_to(
+            parent.author_handle, since=window_since, until=window_until, max_pages=5
+        )
+        sweep_ids = set()
+        for raw in sweep.items:
+            try:
+                sweep_ids.add(parse_tweet(raw).tweet_id)
+            except (TypeError, ValueError):
+                continue
+        in_sweep = tweet_id in sweep_ids
+        result["sweep"] = {
+            "found": in_sweep,
+            "returned": len(sweep_ids),
+            "complete": sweep.complete,
+        }
+        findings.append(
+            "The reply sweep (search to:@account) returned it, so the next scan will log it."
+            if in_sweep
+            else f"The reply sweep also does NOT return it ({len(sweep_ids)} replies in a "
+            "two-day window). X excludes it from search as well; the bot cannot see it "
+            "through any public listing."
+        )
+        return result
 
     async def verify_linked_accounts(
         self,
