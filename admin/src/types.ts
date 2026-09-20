@@ -103,6 +103,16 @@ export type ImportResult = {
 
 export type ImportResponse = { summary: Partial<Record<ImportStatus, number>>; results: ImportResult[] }
 
+export type ScanEstimate = {
+  period: string
+  linked_members: number
+  protected_linked: number
+  unlinked_members: number
+  tracked_posts: number
+  verification_credits_per_account: number
+  previous_scan: { completed_at: string; discovered: number; api_requests: number; items_returned: number; credits: number | null } | null
+}
+
 export type VerifyResponse = {
   checked: number
   include_protected: boolean

@@ -117,6 +117,8 @@ class VerifyRequest(BaseModel):
 
 class ScanRequest(BaseModel):
     period: str = Field(default="24h", min_length=2, max_length=10)
+    verify_x: bool = True
+    skip_protected: bool = False
 
 
 class TrackPostRequest(BaseModel):
@@ -680,13 +682,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         return {"rescored_actions": count}
 
-    async def run_scan(scan_id: str, period: str, actor_id: str) -> None:
+    async def run_scan(
+        scan_id: str,
+        period: str,
+        actor_id: str,
+        *,
+        verify_x: bool = True,
+        include_protected: bool = True,
+    ) -> None:
         try:
             await runtime.service.scan(
                 period=period,
                 actor_discord_id=actor_id,
                 source="admin",
                 scan_id=scan_id,
+                verify_x=verify_x,
+                include_protected=include_protected,
             )
         except Exception:
             LOGGER.exception("Admin-triggered scan %s failed", scan_id)
@@ -704,9 +715,62 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             period=payload.period, triggered_by=actor_id, source="admin"
         )
         runtime.scan_task = asyncio.create_task(
-            run_scan(scan_id, payload.period, actor_id), name=f"scan-{scan_id}"
+            run_scan(
+                scan_id,
+                payload.period,
+                actor_id,
+                verify_x=payload.verify_x,
+                include_protected=not payload.skip_protected,
+            ),
+            name=f"scan-{scan_id}",
         )
         return {"scan_id": scan_id, "status": "running"}
+
+    @app.get("/api/scans/estimate")
+    async def scan_estimate(_: Admin, period: str = "24h") -> dict[str, Any]:
+        """What a scan of ``period`` will touch, and what the last similar scan cost."""
+        try:
+            _, period_label = parse_period(period)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        users = await runtime.repository.list_users(active_only=True)
+        linked = [user for user in users if user.twitter_user_id]
+        previous = next(
+            (
+                scan
+                for scan in await runtime.repository.recent_scans(50)
+                if scan.get("status") == "complete" and scan.get("period") == period_label
+            ),
+            None,
+        )
+        previous_credits: int | None = None
+        if previous:
+            summary = previous.get("summary") or {}
+            items = int(summary.get("tweets_returned") or 0)
+            requests = int(summary.get("api_requests") or 0)
+            checked = int(summary.get("x_checked") or 0)
+            # Tweets cost 15 credits each with a 15-credit floor per request; profile checks
+            # cost about 10 credits each in batches.
+            previous_credits = max(items, requests) * 15 + checked * 10
+        return {
+            "period": period_label,
+            "linked_members": len(linked),
+            "protected_linked": sum(1 for user in linked if user.special_role),
+            "unlinked_members": len(users) - len(linked),
+            "tracked_posts": len(await runtime.repository.list_tracked_posts(active_only=True)),
+            "verification_credits_per_account": 10,
+            "previous_scan": (
+                {
+                    "completed_at": previous.get("completed_at", ""),
+                    "discovered": (previous.get("summary") or {}).get("discovered", 0),
+                    "api_requests": (previous.get("summary") or {}).get("api_requests", 0),
+                    "items_returned": (previous.get("summary") or {}).get("tweets_returned", 0),
+                    "credits": previous_credits,
+                }
+                if previous
+                else None
+            ),
+        }
 
     @app.get("/api/scans")
     async def scans(_: Admin, limit: int = Query(default=20, ge=1, le=100)) -> list[dict[str, Any]]:

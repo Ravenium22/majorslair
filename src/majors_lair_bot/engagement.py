@@ -650,6 +650,8 @@ class EngagementService:
         actor_discord_id: str,
         source: str = "discord",
         scan_id: str | None = None,
+        verify_x: bool = True,
+        include_protected: bool = True,
     ) -> ScanSummary:
         parse_period(period)
         if self._scan_lock.locked():
@@ -660,7 +662,12 @@ class EngagementService:
             period=period, triggered_by=actor_discord_id, source=source
         )
         try:
-            summary = await self._scan_impl(period=period, actor_discord_id=actor_discord_id)
+            summary = await self._scan_impl(
+                period=period,
+                actor_discord_id=actor_discord_id,
+                verify_x=verify_x,
+                include_protected=include_protected,
+            )
             summary.scan_id = run_id
             await self.repository.finish_scan_run(run_id, summary=asdict(summary))
             return summary
@@ -668,7 +675,14 @@ class EngagementService:
             await self.repository.finish_scan_run(run_id, error=str(exc))
             raise
 
-    async def _scan_impl(self, *, period: str, actor_discord_id: str) -> ScanSummary:
+    async def _scan_impl(
+        self,
+        *,
+        period: str,
+        actor_discord_id: str,
+        verify_x: bool = True,
+        include_protected: bool = True,
+    ) -> ScanSummary:
         duration, period_label = parse_period(period)
         async with self._scan_lock:
             config = await self.repository.get_config()
@@ -748,7 +762,12 @@ class EngagementService:
                 cycle_id=cycle_id, discovered=discovered, scopes=scopes
             )
             await self.rescore_current_cycle(config=config)
-            await self.verify_linked_accounts(actor_discord_id=actor_discord_id, summary=summary)
+            if verify_x:
+                await self.verify_linked_accounts(
+                    actor_discord_id=actor_discord_id,
+                    summary=summary,
+                    include_protected=include_protected,
+                )
             summary.api_requests = self.twitter.request_count
             summary.tweets_returned = self.twitter.items_returned
 
