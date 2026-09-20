@@ -67,7 +67,8 @@ async def _check_discord(settings: Settings) -> str:
     return str(me.json().get("username", "bot"))
 
 
-async def _check_twitter(twitter: TwitterApiClient, handle: str) -> None:
+async def _check_twitter(twitter: TwitterApiClient, handle: str) -> bool:
+    """Return True when twitterapi.io answered, False when the balance is empty."""
     try:
         async with twitter:
             await twitter.get_user_info(handle)
@@ -78,11 +79,9 @@ async def _check_twitter(twitter: TwitterApiClient, handle: str) -> None:
                 "(copy it from https://twitterapi.io/dashboard)."
             ) from exc
         if exc.status == 402:
-            raise PreflightError(
-                "twitterapi.io says the account balance is empty. Add credit at "
-                "https://twitterapi.io/dashboard."
-            ) from exc
+            return False
         raise PreflightError(f"twitterapi.io check failed: {exc}") from exc
+    return True
 
 
 def preflight(settings: Settings) -> None:
@@ -96,8 +95,17 @@ def preflight(settings: Settings) -> None:
     print(f"  OK: signed in to Discord as {name}, server {settings.discord_guild_id} visible.")
 
     print("Checking twitterapi.io key...", flush=True)
-    asyncio.run(_check_twitter(TwitterApiClient(settings.twitter_api_key), "m_m3l"))
-    print("  OK: twitterapi.io responded.")
+    has_credit = asyncio.run(_check_twitter(TwitterApiClient(settings.twitter_api_key), "m_m3l"))
+    if has_credit:
+        print("  OK: twitterapi.io responded.")
+    else:
+        print(
+            "  WARNING: the twitterapi.io key is valid but the account balance is empty.\n"
+            "  The bot and dashboard will start, but engagement scans and /link-twitter "
+            "will fail until you add credit at https://twitterapi.io/dashboard.",
+            flush=True,
+        )
+        LOGGER.warning("twitterapi.io balance is empty; scans will fail until credit is added")
 
     print("Admin website settings:")
     print(f"  Public address:      {settings.app_base_url}")
