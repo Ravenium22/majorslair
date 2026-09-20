@@ -129,14 +129,18 @@ class DatabaseRepository:
         return LinkedUser(
             discord_user_id=row.discord_user_id,
             discord_username=row.discord_username,
-            twitter_handle=row.twitter_handle,
-            twitter_user_id=row.twitter_user_id,
+            twitter_handle=row.twitter_handle or "",
+            twitter_user_id=row.twitter_user_id or "",
             linked_at=isoformat(row.linked_at),
             updated_at=isoformat(row.updated_at),
             active=row.active,
             score=float(row.score or 0),
             last_active_at=isoformat(row.last_active_at) if row.last_active_at else "",
             handle_history="|".join(row.handle_history or []),
+            special_role=bool(row.special_role),
+            special_role_names=row.special_role_names or "",
+            x_status=row.x_status or "",
+            x_checked_at=isoformat(row.x_checked_at) if row.x_checked_at else "",
         )
 
     async def list_users(self, *, active_only: bool = False) -> list[LinkedUser]:
@@ -147,6 +151,95 @@ class DatabaseRepository:
         async with self.sessions() as session:
             rows = (await session.scalars(statement)).all()
         return [self._linked_user(row) for row in rows]
+
+    async def register_member(
+        self,
+        *,
+        discord_user_id: str,
+        discord_username: str,
+        special_role: bool | None = None,
+        special_role_names: str | None = None,
+    ) -> tuple[LinkedUser, bool]:
+        """Make sure a member exists in the registry, with or without an X account.
+
+        Returns the member and whether the row was created. Existing rows keep their X link
+        and active flag; only the display name and the special-role fields are refreshed.
+        """
+        now = utc_now()
+        async with self.sessions.begin() as session:
+            row = await session.get(UserRow, discord_user_id, with_for_update=True)
+            created = row is None
+            if row is None:
+                row = UserRow(
+                    discord_user_id=discord_user_id,
+                    discord_username=discord_username or discord_user_id,
+                    twitter_handle=None,
+                    twitter_user_id=None,
+                    linked_at=now,
+                    updated_at=now,
+                    active=True,
+                    score=0,
+                    handle_history=[],
+                    special_role=bool(special_role),
+                    special_role_names=(special_role_names or "").strip()[:255],
+                )
+                session.add(row)
+            else:
+                if discord_username:
+                    row.discord_username = discord_username
+                if special_role is not None:
+                    row.special_role = special_role
+                if special_role_names is not None:
+                    row.special_role_names = special_role_names.strip()[:255]
+                row.updated_at = now
+            await session.flush()
+            user = self._linked_user(row)
+        return user, created
+
+    async def record_x_verification(self, records: list[dict[str, str]]) -> int:
+        """Store the outcome of an X account check; returns how many handles were renamed.
+
+        Each record has ``discord_user_id`` and ``status`` and optionally ``twitter_handle``
+        when X now reports a different handle for the same stable account ID.
+        """
+        renamed = 0
+        now = utc_now()
+        async with self.sessions.begin() as session:
+            for record in records:
+                row = await session.get(UserRow, record["discord_user_id"], with_for_update=True)
+                if row is None:
+                    continue
+                row.x_status = record.get("status", "")[:32]
+                row.x_checked_at = now
+                new_handle = (record.get("twitter_handle") or "").lower()
+                if new_handle and new_handle != (row.twitter_handle or "").lower():
+                    history = list(row.handle_history or [])
+                    if row.twitter_handle and row.twitter_handle not in history:
+                        history.append(row.twitter_handle)
+                    row.handle_history = history
+                    row.twitter_handle = new_handle
+                    renamed += 1
+                row.updated_at = now
+        return renamed
+
+    async def set_special_role(
+        self,
+        discord_user_id: str,
+        *,
+        special_role: bool,
+        special_role_names: str | None = None,
+    ) -> LinkedUser | None:
+        async with self.sessions.begin() as session:
+            row = await session.get(UserRow, discord_user_id, with_for_update=True)
+            if row is None:
+                return None
+            row.special_role = special_role
+            if special_role_names is not None:
+                row.special_role_names = special_role_names.strip()[:255]
+            elif not special_role:
+                row.special_role_names = ""
+            row.updated_at = utc_now()
+            return self._linked_user(row)
 
     async def link_user(
         self,
@@ -177,7 +270,7 @@ class DatabaseRepository:
                 )
 
             target = await session.get(UserRow, discord_user_id, with_for_update=True)
-            old_handle = target.twitter_handle if target else ""
+            old_handle = (target.twitter_handle or "") if target else ""
             if target is None:
                 target = UserRow(
                     discord_user_id=discord_user_id,
@@ -206,11 +299,11 @@ class DatabaseRepository:
     async def unlink_user(self, discord_user_id: str) -> str:
         async with self.sessions.begin() as session:
             row = await session.get(UserRow, discord_user_id, with_for_update=True)
-            if row is None or not row.active:
+            if row is None or not row.active or not row.twitter_user_id:
                 return ""
             row.active = False
             row.updated_at = utc_now()
-            return row.twitter_handle
+            return row.twitter_handle or ""
 
     async def get_user(self, discord_user_id: str) -> LinkedUser | None:
         async with self.sessions() as session:
@@ -220,7 +313,7 @@ class DatabaseRepository:
     async def leaderboard(self, limit: int = 25) -> list[LinkedUser]:
         statement = (
             select(UserRow)
-            .where(UserRow.active.is_(True))
+            .where(UserRow.active.is_(True), UserRow.twitter_user_id.is_not(None))
             .order_by(UserRow.score.desc(), UserRow.discord_username)
             .limit(limit)
         )
@@ -228,11 +321,20 @@ class DatabaseRepository:
             rows = (await session.scalars(statement)).all()
         return [self._linked_user(row) for row in rows]
 
-    async def low_activity(self, threshold: float) -> list[LinkedUser]:
+    async def low_activity(
+        self, threshold: float, *, include_protected: bool = False
+    ) -> list[LinkedUser]:
+        """Active members at or below the threshold, unlinked members first (score 0).
+
+        Special-role members are left out unless ``include_protected`` is set.
+        """
+        filters = [UserRow.active.is_(True), UserRow.score <= threshold]
+        if not include_protected:
+            filters.append(UserRow.special_role.is_(False))
         statement = (
             select(UserRow)
-            .where(UserRow.active.is_(True), UserRow.score <= threshold)
-            .order_by(UserRow.score, UserRow.discord_username)
+            .where(*filters)
+            .order_by(UserRow.score, UserRow.twitter_user_id.is_not(None), UserRow.discord_username)
         )
         async with self.sessions() as session:
             rows = (await session.scalars(statement)).all()
@@ -532,7 +634,7 @@ class DatabaseRepository:
                         cycle_id=old_cycle,
                         discord_user_id=user.discord_user_id,
                         discord_username=user.discord_username,
-                        twitter_handle=user.twitter_handle,
+                        twitter_handle=user.twitter_handle or "",
                         score=float(user.score or 0),
                         rank=rank,
                         reset_by_discord_id=actor_discord_id,
@@ -585,7 +687,9 @@ class DatabaseRepository:
     async def _overview_counts(session: AsyncSession, cycle_id: str) -> tuple[int, float, int, int]:
         linked_count = int(
             await session.scalar(
-                select(func.count()).select_from(UserRow).where(UserRow.active.is_(True))
+                select(func.count())
+                .select_from(UserRow)
+                .where(UserRow.active.is_(True), UserRow.twitter_user_id.is_not(None))
             )
             or 0
         )
@@ -619,6 +723,9 @@ class DatabaseRepository:
         *,
         search: str = "",
         active: bool | None = None,
+        protected: bool | None = None,
+        linked: bool | None = None,
+        x_ok: bool | None = None,
         page: int = 1,
         page_size: int = 50,
     ) -> dict[str, Any]:
@@ -630,10 +737,19 @@ class DatabaseRepository:
                     UserRow.discord_username.ilike(pattern),
                     UserRow.twitter_handle.ilike(pattern),
                     UserRow.discord_user_id.ilike(pattern),
+                    UserRow.special_role_names.ilike(pattern),
                 )
             )
         if active is not None:
             filters.append(UserRow.active.is_(active))
+        if protected is not None:
+            filters.append(UserRow.special_role.is_(protected))
+        if linked is not None:
+            has_x = UserRow.twitter_user_id.is_not(None)
+            filters.append(has_x if linked else UserRow.twitter_user_id.is_(None))
+        if x_ok is not None:
+            healthy = UserRow.x_status.in_(["", "ok"])
+            filters.append(healthy if x_ok else ~healthy)
         count_statement = select(func.count()).select_from(UserRow).where(*filters)
         statement = (
             select(UserRow)
@@ -657,14 +773,15 @@ class DatabaseRepository:
             row = await session.get(UserRow, discord_user_id, with_for_update=True)
             if row is None:
                 return None
-            if active and not row.active:
+            if active and not row.active and row.twitter_user_id:
                 duplicate = await session.scalar(
                     select(UserRow).where(
                         UserRow.active.is_(True),
                         UserRow.discord_user_id != discord_user_id,
                         or_(
                             UserRow.twitter_user_id == row.twitter_user_id,
-                            func.lower(UserRow.twitter_handle) == row.twitter_handle.lower(),
+                            func.lower(UserRow.twitter_handle)
+                            == (row.twitter_handle or "").lower(),
                         ),
                     )
                 )

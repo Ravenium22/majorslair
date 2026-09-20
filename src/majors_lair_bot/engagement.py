@@ -67,31 +67,42 @@ class EngagementService:
 
     async def import_links(
         self,
-        rows: list[tuple[str, str, str]],
+        rows: list[dict[str, Any]],
         *,
         actor_discord_id: str,
         concurrency: int = 4,
     ) -> list[dict[str, str]]:
-        """Bulk-link (discord_user_id, discord_username, handle) rows from a spreadsheet.
+        """Bulk-register members from a spreadsheet and link the ones with an X handle.
 
-        Every row gets a result with a ``status`` of linked, relinked, unchanged, skipped,
-        conflict, or failed, in input order. Rows already linked to the same handle are
-        left alone without spending a twitterapi.io lookup. A rejected key or an empty
-        balance aborts the remaining lookups instead of failing them one by one.
+        Each row is a dict with ``discord_user_id``, ``discord_username``, ``twitter_handle``
+        and optionally ``special_role`` / ``special_role_names``. Every member in the sheet
+        ends up in the registry; those without a handle are ``registered`` and can link
+        later. Every row gets a ``status`` of linked, relinked, unchanged, registered,
+        conflict, or failed, in input order. Rows already linked to the same handle never
+        spend a twitterapi.io lookup, and a rejected key or an empty balance aborts the
+        remaining lookups instead of failing them one by one.
         """
         semaphore = asyncio.Semaphore(max(1, concurrency))
         abort_message: str | None = None
 
-        async def process(row: tuple[str, str, str]) -> dict[str, str]:
+        async def process(row: dict[str, Any]) -> dict[str, str]:
             nonlocal abort_message
-            discord_user_id, discord_username, raw_handle = row
+            discord_user_id = str(row["discord_user_id"])
+            discord_username = str(row.get("discord_username") or discord_user_id)
+            raw_handle = str(row.get("twitter_handle") or "")
             result = {
                 "discord_user_id": discord_user_id,
                 "discord_username": discord_username,
                 "twitter_handle": raw_handle.strip().removeprefix("@"),
             }
+            await self.repository.register_member(
+                discord_user_id=discord_user_id,
+                discord_username=discord_username,
+                special_role=row.get("special_role"),
+                special_role_names=row.get("special_role_names"),
+            )
             if not raw_handle.strip():
-                return {**result, "status": "skipped", "message": "No X handle in the sheet"}
+                return {**result, "status": "registered", "message": "No X handle yet"}
             try:
                 normalized = normalize_handle(raw_handle)
             except ValueError as exc:
@@ -115,7 +126,11 @@ class EngagementService:
                     if exc.status in {401, 402}:
                         abort_message = str(exc)
                     if exc.status == 404 or "not found" in str(exc).lower():
-                        return {**result, "status": "failed", "message": "X account not found"}
+                        return {
+                            **result,
+                            "status": "failed",
+                            "message": "X account not found; registered without a link",
+                        }
                     return {**result, "status": "failed", "message": str(exc)}
             result["twitter_handle"] = new_handle
             if old_handle and old_handle != new_handle:
@@ -132,6 +147,85 @@ class EngagementService:
             details={"rows": len(rows), **counts},
         )
         return results
+
+    async def verify_linked_accounts(
+        self, *, actor_discord_id: str = "", summary: ScanSummary | None = None
+    ) -> dict[str, Any]:
+        """Check every linked X account by its stable ID.
+
+        Suspended or deleted accounts are flagged on the member, renamed accounts get their
+        handle updated automatically, and the outcome is written to ``summary`` when a scan
+        is running. A twitterapi.io failure becomes a warning instead of failing the scan.
+        """
+        users = [
+            user
+            for user in await self.repository.list_users(active_only=True)
+            if user.twitter_user_id
+        ]
+        outcome: dict[str, Any] = {"checked": 0, "unavailable": [], "renamed": []}
+        if not users:
+            return outcome
+        try:
+            profiles = await self.twitter.get_users_by_ids([u.twitter_user_id for u in users])
+        except TwitterApiError as exc:
+            message = f"Could not verify X accounts: {exc}"
+            LOGGER.warning(message)
+            if summary is not None:
+                summary.warnings.append(message)
+            outcome["error"] = str(exc)
+            return outcome
+
+        records: list[dict[str, str]] = []
+        for user in users:
+            profile = profiles.get(user.twitter_user_id)
+            if profile is None or profile.get("unavailable"):
+                reason = str(
+                    (profile or {}).get("unavailableReason")
+                    or (profile or {}).get("message")
+                    or "account not found"
+                ).strip()
+                status = "suspended" if "suspend" in reason.lower() else "unavailable"
+                records.append({"discord_user_id": user.discord_user_id, "status": status})
+                outcome["unavailable"].append(
+                    {
+                        "discord_user_id": user.discord_user_id,
+                        "discord_username": user.discord_username,
+                        "twitter_handle": user.twitter_handle,
+                        "status": status,
+                        "reason": reason[:120],
+                    }
+                )
+                continue
+            _, handle, _ = parse_twitter_user(profile)
+            handle = (handle or "").lower()
+            record = {"discord_user_id": user.discord_user_id, "status": "ok"}
+            if handle and handle != user.twitter_handle.lower():
+                record["twitter_handle"] = handle
+                outcome["renamed"].append(
+                    {
+                        "discord_user_id": user.discord_user_id,
+                        "discord_username": user.discord_username,
+                        "old_handle": user.twitter_handle,
+                        "new_handle": handle,
+                    }
+                )
+            records.append(record)
+        await self.repository.record_x_verification(records)
+        outcome["checked"] = len(users)
+        if summary is not None:
+            summary.x_checked = len(users)
+            summary.x_unavailable = list(outcome["unavailable"])
+            summary.x_renamed = list(outcome["renamed"])
+        await self.repository.append_audit(
+            event_type="x_accounts_verified",
+            actor_discord_id=actor_discord_id,
+            details={
+                "checked": len(users),
+                "unavailable": len(outcome["unavailable"]),
+                "renamed": len(outcome["renamed"]),
+            },
+        )
+        return outcome
 
     async def unlink_user(self, *, discord_user_id: str) -> str:
         old_handle = await self.repository.unlink_user(discord_user_id)
@@ -643,6 +737,7 @@ class EngagementService:
                 cycle_id=cycle_id, discovered=discovered, scopes=scopes
             )
             await self.rescore_current_cycle(config=config)
+            await self.verify_linked_accounts(actor_discord_id=actor_discord_id, summary=summary)
             summary.api_requests = self.twitter.request_count
             summary.tweets_returned = self.twitter.items_returned
 
@@ -673,6 +768,9 @@ class EngagementService:
                     "items_returned": summary.tweets_returned,
                     "incomplete_scopes": summary.incomplete_scopes,
                     "warnings": summary.warnings,
+                    "x_checked": summary.x_checked,
+                    "x_unavailable": len(summary.x_unavailable),
+                    "x_renamed": len(summary.x_renamed),
                 },
             )
             return summary

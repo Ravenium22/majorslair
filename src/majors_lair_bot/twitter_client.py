@@ -428,6 +428,33 @@ class TwitterApiClient:
             max_pages=max_pages,
         )
 
+    async def get_users_by_ids(self, user_ids: list[str]) -> dict[str, dict[str, Any]]:
+        """Profiles keyed by stable X user ID, 100 per request.
+
+        IDs missing from the result, or returned with ``unavailable`` set, belong to
+        suspended or deleted accounts.
+        """
+        found: dict[str, dict[str, Any]] = {}
+        for offset in range(0, len(user_ids), 100):
+            batch = user_ids[offset : offset + 100]
+            payload = await self._request_json(
+                "/twitter/user/batch_info_by_ids", params={"userIds": ",".join(batch)}
+            )
+            users = payload.get("users", [])
+            if not isinstance(users, list):
+                continue
+            self.items_returned += len(users)
+            for item in users:
+                if not isinstance(item, dict):
+                    continue
+                user_id = str(
+                    deep_get(item, (("id",), ("id_str",), ("rest_id",), ("userId",)), default="")
+                    or ""
+                )
+                if user_id:
+                    found[user_id] = item
+        return found
+
     async def get_tweets(self, tweet_ids: list[str]) -> list[Tweet]:
         output: list[Tweet] = []
         for offset in range(0, len(tweet_ids), 100):

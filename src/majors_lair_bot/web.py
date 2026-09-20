@@ -83,8 +83,14 @@ class AppRuntime:
         await self.repository.close()
 
 
-class UserToggle(BaseModel):
+class ActiveToggle(BaseModel):
     active: bool
+
+
+class UserUpdate(BaseModel):
+    active: bool | None = None
+    special_role: bool | None = None
+    special_role_names: str | None = Field(default=None, max_length=255)
 
 
 class LinkUserRequest(BaseModel):
@@ -97,6 +103,8 @@ class ImportRow(BaseModel):
     discord_user_id: str = Field(min_length=5, max_length=32, pattern=r"^\d+$")
     discord_username: str = Field(min_length=1, max_length=120)
     twitter_handle: str = Field(default="", max_length=64)
+    special_role: bool | None = None
+    special_role_names: str | None = Field(default=None, max_length=255)
 
 
 class ImportRequest(BaseModel):
@@ -356,13 +364,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: Admin,
         search: str = "",
         active: bool | None = None,
+        protected: bool | None = None,
+        linked: bool | None = None,
+        x_ok: bool | None = None,
         page: int = 1,
         page_size: int = 50,
     ) -> dict[str, Any]:
         page, page_size = _page(page, page_size)
         return await runtime.repository.paginated_users(
-            search=search, active=active, page=page, page_size=page_size
+            search=search,
+            active=active,
+            protected=protected,
+            linked=linked,
+            x_ok=x_ok,
+            page=page,
+            page_size=page_size,
         )
+
+    @app.post("/api/users/verify-x")
+    async def verify_x_accounts(admin: MutatingAdmin) -> dict[str, Any]:
+        outcome = await runtime.service.verify_linked_accounts(
+            actor_discord_id=str(admin["discord_user_id"])
+        )
+        if outcome.get("error"):
+            raise HTTPException(status_code=502, detail=str(outcome["error"]))
+        return outcome
 
     @app.post("/api/users/link")
     async def link_user(payload: LinkUserRequest, admin: MutatingAdmin) -> dict[str, str]:
@@ -383,7 +409,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/api/users/import")
     async def import_users(payload: ImportRequest, admin: MutatingAdmin) -> dict[str, Any]:
         seen: set[str] = set()
-        rows: list[tuple[str, str, str]] = []
+        rows: list[dict[str, Any]] = []
         for row in payload.rows:
             if row.discord_user_id in seen:
                 raise HTTPException(
@@ -391,7 +417,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     detail=f"Discord ID {row.discord_user_id} appears more than once",
                 )
             seen.add(row.discord_user_id)
-            rows.append((row.discord_user_id, row.discord_username.strip(), row.twitter_handle))
+            rows.append(
+                {
+                    "discord_user_id": row.discord_user_id,
+                    "discord_username": row.discord_username.strip(),
+                    "twitter_handle": row.twitter_handle,
+                    "special_role": row.special_role,
+                    "special_role_names": row.special_role_names,
+                }
+            )
         results = await runtime.service.import_links(
             rows, actor_discord_id=str(admin["discord_user_id"])
         )
@@ -402,21 +436,141 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.patch("/api/users/{discord_user_id}")
     async def update_user(
-        discord_user_id: str, payload: UserToggle, admin: MutatingAdmin
+        discord_user_id: str, payload: UserUpdate, admin: MutatingAdmin
     ) -> dict[str, Any]:
-        try:
-            user = await runtime.repository.set_user_active(discord_user_id, payload.active)
-        except LinkConflictError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        if user is None:
-            raise HTTPException(status_code=404, detail="Member not found")
-        await runtime.repository.append_audit(
-            event_type="member_activated" if payload.active else "member_deactivated",
-            actor_discord_id=str(admin["discord_user_id"]),
-            subject_discord_id=discord_user_id,
-            new_value=str(payload.active),
-        )
+        if (
+            payload.active is None
+            and payload.special_role is None
+            and payload.special_role_names is None
+        ):
+            raise HTTPException(status_code=422, detail="Nothing to update")
+        actor_id = str(admin["discord_user_id"])
+        user = None
+        if payload.active is not None:
+            try:
+                user = await runtime.repository.set_user_active(discord_user_id, payload.active)
+            except LinkConflictError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            if user is None:
+                raise HTTPException(status_code=404, detail="Member not found")
+            await runtime.repository.append_audit(
+                event_type="admin_member_toggled",
+                actor_discord_id=actor_id,
+                subject_discord_id=discord_user_id,
+                new_value="active" if payload.active else "inactive",
+            )
+        if payload.special_role is not None or payload.special_role_names is not None:
+            before = await runtime.repository.get_user(discord_user_id)
+            if before is None:
+                raise HTTPException(status_code=404, detail="Member not found")
+            protected = (
+                payload.special_role if payload.special_role is not None else before.special_role
+            )
+            user = await runtime.repository.set_special_role(
+                discord_user_id,
+                special_role=protected,
+                special_role_names=payload.special_role_names,
+            )
+            assert user is not None
+            await runtime.repository.append_audit(
+                event_type="admin_member_protection_changed",
+                actor_discord_id=actor_id,
+                subject_discord_id=discord_user_id,
+                old_value="protected" if before.special_role else "regular",
+                new_value="protected" if user.special_role else "regular",
+                details={"special_role_names": user.special_role_names},
+            )
+        assert user is not None
         return asdict(user)
+
+    @app.post("/api/users/sync-discord")
+    async def sync_discord_members(admin: MutatingAdmin) -> dict[str, Any]:
+        """Register every human member of the Discord server who is not in the registry yet.
+
+        Uses the bot token against the REST API, so it works even when the gateway bot is
+        disabled. Discord only serves the member list when the Server Members Intent is
+        enabled for the application.
+        """
+        headers = {"Authorization": f"Bot {runtime.settings.discord_token}"}
+        guild_id = runtime.settings.discord_guild_id
+        members: list[dict[str, Any]] = []
+        after = "0"
+        for _ in range(100):  # 100 pages x 1000 members is far beyond this community
+            response = await runtime.http.get(
+                f"{DISCORD_API}/guilds/{guild_id}/members",
+                headers=headers,
+                params={"limit": 1000, "after": after},
+            )
+            if response.status_code == 403:
+                raise HTTPException(
+                    status_code=502,
+                    detail=(
+                        "Discord refused the member list. Enable 'Server Members Intent' "
+                        "under Bot > Privileged Gateway Intents in the Developer Portal, "
+                        "then try again."
+                    ),
+                )
+            if response.status_code >= 400:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Discord member list failed ({response.status_code})",
+                )
+            page = response.json()
+            if not isinstance(page, list) or not page:
+                break
+            members.extend(item for item in page if isinstance(item, dict))
+            after = str(page[-1].get("user", {}).get("id", ""))
+            if len(page) < 1000 or not after:
+                break
+
+        registry = {user.discord_user_id: user for user in await runtime.repository.list_users()}
+        added: list[dict[str, str]] = []
+        bots = 0
+        for member in members:
+            user = member.get("user") or {}
+            user_id = str(user.get("id") or "")
+            if not user_id:
+                continue
+            if user.get("bot") or user.get("system"):
+                bots += 1
+                continue
+            if user_id in registry:
+                continue
+            display = (
+                member.get("nick") or user.get("global_name") or user.get("username") or user_id
+            )
+            await runtime.repository.register_member(
+                discord_user_id=user_id, discord_username=str(display)[:120]
+            )
+            added.append({"discord_user_id": user_id, "discord_username": str(display)})
+
+        discord_ids = {
+            str((m.get("user") or {}).get("id") or "")
+            for m in members
+            if not (m.get("user") or {}).get("bot")
+        }
+        left = [
+            {"discord_user_id": user.discord_user_id, "discord_username": user.discord_username}
+            for user in registry.values()
+            if user.active and user.discord_user_id not in discord_ids
+        ]
+        await runtime.repository.append_audit(
+            event_type="admin_members_synced",
+            actor_discord_id=str(admin["discord_user_id"]),
+            details={
+                "discord_members": len(members),
+                "bots_skipped": bots,
+                "added": len(added),
+                "left_server": len(left),
+            },
+        )
+        return {
+            "discord_members": len(members) - bots,
+            "bots_skipped": bots,
+            "already_registered": len(members) - bots - len(added),
+            "added": added,
+            "left_server": left,
+        }
 
     @app.get("/api/actions")
     async def actions(
@@ -461,7 +615,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.patch("/api/tracked-posts/{tweet_id}")
     async def set_tracked_post(
-        tweet_id: str, payload: UserToggle, admin: MutatingAdmin
+        tweet_id: str, payload: ActiveToggle, admin: MutatingAdmin
     ) -> dict[str, bool]:
         rows = await runtime.repository.list_tracked_posts(active_only=False)
         row = next((item for item in rows if item["tweet_id"] == tweet_id), None)
@@ -542,12 +696,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return await runtime.repository.recent_scans(limit)
 
     @app.get("/api/low-activity")
-    async def low_activity(_: Admin, threshold: float | None = None) -> dict[str, Any]:
+    async def low_activity(
+        _: Admin, threshold: float | None = None, include_protected: bool = False
+    ) -> dict[str, Any]:
         if threshold is None:
             config_values = await runtime.repository.get_config()
             threshold = float(config_values["low_activity_threshold"])
-        users_list = await runtime.repository.low_activity(threshold)
-        return {"threshold": threshold, "items": [asdict(user) for user in users_list]}
+        users_list = await runtime.repository.low_activity(
+            threshold, include_protected=include_protected
+        )
+        return {
+            "threshold": threshold,
+            "include_protected": include_protected,
+            "items": [asdict(user) for user in users_list],
+        }
 
     @app.post("/api/reset")
     async def reset(payload: ResetRequest, admin: MutatingAdmin) -> dict[str, Any]:

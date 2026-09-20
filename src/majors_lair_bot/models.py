@@ -24,6 +24,10 @@ class LinkedUser:
     score: float = 0.0
     last_active_at: str = ""
     handle_history: str = ""
+    special_role: bool = False
+    special_role_names: str = ""
+    x_status: str = ""
+    x_checked_at: str = ""
 
 
 @dataclass(slots=True)
@@ -102,3 +106,6 @@ class ScanSummary:
     tweets_returned: int = 0
     changed_actions: int = 0
     warnings: list[str] = field(default_factory=list)
+    x_checked: int = 0
+    x_unavailable: list[dict[str, str]] = field(default_factory=list)
+    x_renamed: list[dict[str, str]] = field(default_factory=list)

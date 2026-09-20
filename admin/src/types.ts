@@ -15,6 +15,10 @@ export type LinkedUser = {
   score: number
   last_active_at: string
   handle_history: string
+  special_role: boolean
+  special_role_names: string
+  x_status: '' | 'ok' | 'suspended' | 'unavailable'
+  x_checked_at: string
 }
 
 export type Scan = {
@@ -25,7 +29,7 @@ export type Scan = {
   source: string
   started_at: string
   completed_at: string
-  summary: Record<string, number | string | string[]>
+  summary: Record<string, number | string | string[] | Record<string, string>[]>
   error: string
 }
 
@@ -87,7 +91,7 @@ export type AuditEntry = {
   created_at: string
 }
 
-export type ImportStatus = 'linked' | 'relinked' | 'unchanged' | 'skipped' | 'conflict' | 'failed'
+export type ImportStatus = 'linked' | 'relinked' | 'unchanged' | 'registered' | 'skipped' | 'conflict' | 'failed'
 
 export type ImportResult = {
   discord_user_id: string
@@ -98,3 +102,17 @@ export type ImportResult = {
 }
 
 export type ImportResponse = { summary: Partial<Record<ImportStatus, number>>; results: ImportResult[] }
+
+export type VerifyResponse = {
+  checked: number
+  unavailable: { discord_user_id: string; discord_username: string; twitter_handle: string; status: string; reason: string }[]
+  renamed: { discord_user_id: string; discord_username: string; old_handle: string; new_handle: string }[]
+}
+
+export type DiscordSyncResponse = {
+  discord_members: number
+  bots_skipped: number
+  already_registered: number
+  added: { discord_user_id: string; discord_username: string }[]
+  left_server: { discord_user_id: string; discord_username: string }[]
+}

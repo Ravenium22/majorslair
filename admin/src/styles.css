@@ -150,3 +150,10 @@ td a { font-weight: 600; }.scan-history { margin-bottom: 22px; }
 .import-summary { margin-top: 14px; color: var(--text) !important; font-size: 12px; }
 .import-results { max-height: 46vh; margin-top: 14px; border: 1px solid var(--line-soft); }
 .import-results .muted { color: var(--muted); font-size: 12px; }
+.protected-cell { display: inline-flex; flex-direction: column; gap: 3px; }
+.protected-cell small { color: var(--muted); font-size: 11px; }
+.row-actions { white-space: nowrap; }
+.row-actions .icon-button + .icon-button { margin-left: 4px; }
+.sub-heading { margin: 16px 0 0; color: var(--amber); font: 600 10px "Cascadia Mono", Consolas, monospace; letter-spacing: .08em; text-transform: uppercase; }
+td .muted { color: var(--muted); }
+.issue-link { color: var(--red); text-decoration: none; }

@@ -13,6 +13,11 @@ Hetzner setup guide. Everything below is the developer reference.
 ## What ships
 
 - Discord ↔ X member linking with stable X account IDs and duplicate prevention
+- Member registry that holds everyone, with or without an X account: CSV import from the
+  community sheet (including SPECIAL ROLE flags), one-click sync of the Discord member list,
+  and protected members who never appear in the low-activity report
+- X account verification on every scan: suspended or deleted accounts are flagged and
+  listed, renamed accounts are updated automatically by their stable ID
 - Replies, quotes, retweets, and organic-mention collection through twitterapi.io
 - Transparent quality scoring, repeated-text suppression, and daily action caps
 - Responsive admin console with overview, members, activity, posts, scoring, and audit views

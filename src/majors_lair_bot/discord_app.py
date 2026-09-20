@@ -163,7 +163,8 @@ class EngagementCog(commands.Cog):
     async def leaderboard(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(thinking=True)
         users = await self.bot.repository.list_users(active_only=True)
-        ranked = sorted(users, key=lambda user: (-user.score, user.discord_username.lower()))
+        linked = [user for user in users if user.twitter_user_id]
+        ranked = sorted(linked, key=lambda user: (-user.score, user.discord_username.lower()))
         if not ranked:
             await interaction.followup.send("No linked members yet.")
             return
@@ -195,7 +196,8 @@ class EngagementCog(commands.Cog):
     async def my_score(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True, thinking=True)
         users = await self.bot.repository.list_users(active_only=True)
-        ranked = sorted(users, key=lambda user: (-user.score, user.discord_username.lower()))
+        linked = [user for user in users if user.twitter_user_id]
+        ranked = sorted(linked, key=lambda user: (-user.score, user.discord_username.lower()))
         rank = next(
             (
                 index
@@ -282,6 +284,27 @@ class EngagementCog(commands.Cog):
                 f"Incomplete capped scopes: **{summary.incomplete_scopes}**"
             ),
         )
+        if summary.x_checked:
+            embed.add_field(
+                name="X accounts",
+                value=(
+                    f"Checked: **{summary.x_checked}**\n"
+                    f"Suspended or gone: **{len(summary.x_unavailable)}**\n"
+                    f"Renamed (auto-updated): **{len(summary.x_renamed)}**"
+                ),
+            )
+        if summary.x_unavailable:
+            lines = [
+                f"• <@{item['discord_user_id']}> · `@{item['twitter_handle']}` · {item['status']}"
+                for item in summary.x_unavailable[:20]
+            ]
+            if len(summary.x_unavailable) > 20:
+                lines.append(f"…and {len(summary.x_unavailable) - 20} more (see the dashboard).")
+            embed.add_field(
+                name="Could not verify these X accounts",
+                value="\n".join(lines)[:1024],
+                inline=False,
+            )
         if summary.warnings:
             embed.add_field(
                 name="Warnings",
@@ -351,17 +374,25 @@ class EngagementCog(commands.Cog):
         if users:
             lines = [
                 f"<@{user.discord_user_id}> · {score_label(user.score)} pts · "
-                f"`@{user.twitter_handle}`"
+                + (f"`@{user.twitter_handle}`" if user.twitter_user_id else "*no X linked*")
+                + (f" ⚠ X {user.x_status}" if user.x_status in {"suspended", "unavailable"} else "")
                 for user in users[:50]
             ]
             suffix = f"\n…and {len(users) - 50} more." if len(users) > 50 else ""
             description = "\n".join(lines) + suffix
         else:
-            description = "No active linked members are at or below this threshold."
+            description = "No active members are at or below this threshold."
+        unlinked = sum(1 for user in users if not user.twitter_user_id)
         embed = discord.Embed(
             title=f"Low activity · ≤ {score_label(effective)} points",
             description=description,
             color=discord.Color.orange(),
+        )
+        embed.set_footer(
+            text=(
+                f"{len(users)} members · {unlinked} without an X account · "
+                "special-role members are excluded"
+            )
         )
         await interaction.followup.send(embed=embed, ephemeral=True)
         await self.bot.repository.append_audit(

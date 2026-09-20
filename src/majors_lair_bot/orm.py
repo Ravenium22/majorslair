@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, Index, Integer, String, Text, text
+from sqlalchemy import JSON, Boolean, DateTime, Float, Index, Integer, String, Text, false, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -15,14 +15,28 @@ class UserRow(Base):
 
     discord_user_id: Mapped[str] = mapped_column(String(32), primary_key=True)
     discord_username: Mapped[str] = mapped_column(String(120), nullable=False)
-    twitter_handle: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
-    twitter_user_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    # Both X columns are NULL for members who are registered (for example imported from the
+    # community sheet) but have not linked an X account yet.
+    twitter_handle: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    twitter_user_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     linked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
     score: Mapped[float] = mapped_column(Float, nullable=False, default=0)
     last_active_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     handle_history: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    # "Special role" members (builders, friends, collaborators, team, active supporters) are
+    # protected: they never appear in the low-activity report.
+    special_role: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false(), index=True
+    )
+    special_role_names: Mapped[str] = mapped_column(
+        String(255), nullable=False, default="", server_default=""
+    )
+    # Result of the last X account verification: "" (never checked), "ok", "suspended",
+    # or "unavailable" (deleted, deactivated, or otherwise gone).
+    x_status: Mapped[str] = mapped_column(String(32), nullable=False, default="", server_default="")
+    x_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (
         Index("ix_users_active_score", "active", "score"),

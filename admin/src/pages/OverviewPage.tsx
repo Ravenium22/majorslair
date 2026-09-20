@@ -75,8 +75,8 @@ export default function OverviewPage({ session }: { session: Session }) {
       </section>
       <section className="panel scan-history">
         <div className="panel-head"><div><p className="eyebrow">System activity</p><h2>Recent scan runs</h2></div><Bot size={21} /></div>
-        <div className="table-wrap"><table><thead><tr><th>Status</th><th>Window</th><th>Source</th><th>Started</th><th>Matched</th><th>Requests</th></tr></thead><tbody>
-          {data?.recent_scans.map((item) => <tr key={item.scan_id}><td><Status state={item.status} /></td><td className="mono">{item.period}</td><td>{item.source}</td><td>{formatDate(item.started_at)}</td><td>{item.summary?.discovered ?? '—'}</td><td>{item.summary?.api_requests ?? '—'}</td></tr>)}
+        <div className="table-wrap"><table><thead><tr><th>Status</th><th>Window</th><th>Source</th><th>Started</th><th>Matched</th><th>X issues</th><th>Requests</th></tr></thead><tbody>
+          {data?.recent_scans.map((item) => <tr key={item.scan_id}><td><Status state={item.status} /></td><td className="mono">{item.period}</td><td>{item.source}</td><td>{formatDate(item.started_at)}</td><td>{String(item.summary?.discovered ?? '—')}</td><td>{Array.isArray(item.summary?.x_unavailable) ? (item.summary.x_unavailable.length ? <a href="#members" className="issue-link">{item.summary.x_unavailable.length} suspended</a> : '0') : '—'}</td><td>{String(item.summary?.api_requests ?? '—')}</td></tr>)}
         </tbody></table></div>
       </section>
     </div>
