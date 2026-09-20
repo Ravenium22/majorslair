@@ -5,7 +5,7 @@ import { api, formatDate, formatScore, mutateApi } from '../api'
 import { Empty, PageHeader, Status, Toast } from '../components'
 import type { Overview, ScanEstimate, Session } from '../types'
 
-const PERIOD_LABEL: Record<string, string> = { '24h': 'last 24 hours', '7d': 'last 7 days', '30d': 'last 30 days' }
+const PERIOD_LABEL: Record<string, string> = { '24h': 'last 24 hours', '7d': 'last 7 days', '30d': 'last 30 days', '60d': 'last 60 days', '90d': 'last 90 days', '180d': 'last 180 days' }
 
 export default function OverviewPage({ session }: { session: Session }) {
   const { data, mutate, isLoading } = useSWR<Overview>('/api/overview', api, { refreshInterval: 10000 })
@@ -96,7 +96,7 @@ export default function OverviewPage({ session }: { session: Session }) {
           <p className="eyebrow">Manual scan</p>
           <h2>Refresh the signal</h2>
           <p>Collect recent replies, quotes, retweets, and organic mentions from tracked accounts.</p>
-          <label>Lookback window<select value={period} onChange={(event) => setPeriod(event.target.value)}><option value="24h">Last 24 hours</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option></select></label>
+          <label>Lookback window<select value={period} onChange={(event) => setPeriod(event.target.value)}><option value="24h">Last 24 hours</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option><option value="60d">Last 60 days</option><option value="90d">Last 90 days</option><option value="180d">Last 180 days</option></select></label>
           <button className="button primary" onClick={openScan} disabled={data?.last_scan?.status === 'running' || loadingEstimate}><Play size={17} />{data?.last_scan?.status === 'running' ? 'Scan running' : loadingEstimate ? 'Estimating cost…' : 'Run engagement scan'}</button>
           <small><Clock3 size={13} /> Last completed {formatDate(data?.last_scan?.completed_at)}</small>
         </aside>
@@ -109,6 +109,7 @@ export default function OverviewPage({ session }: { session: Session }) {
           <div><dt>Posts in this window</dt><dd>{scanEstimate ? scanEstimate.source_posts : '—'}<small>{scanEstimate ? `${scanEstimate.engagement_items.toLocaleString()} replies, quotes & retweets to read` : estimate.estimate.error ?? 'could not read the tracked accounts'}</small></dd></div>
           <div className="wide"><dt>Estimated cost of this scan</dt><dd>{scanEstimate ? `≈ ${totalLow.toLocaleString()} – ${totalHigh.toLocaleString()} credits` : '—'}<small>{scanEstimate ? `${usd(totalLow)} – ${usd(totalHigh)} · posts & engagement ${scanEstimate.engagement_credits + scanEstimate.source_credits} cr · mentions up to ${scanEstimate.mentions_credits_max} cr · X checks ${verifyCredits} cr` : ''}{estimate.previous_scan?.credits != null ? ` · last ${estimate.period} scan actually cost ≈ ${estimate.previous_scan.credits.toLocaleString()} cr (${usd(estimate.previous_scan.credits)})` : ''}</small></dd></div>
         </dl>
+        {scanEstimate?.warnings.length ? <p className="estimate-warning">{scanEstimate.warnings.join(' ')}</p> : null}
         <label className="check-row"><input type="checkbox" checked={skipProtected} onChange={(e) => setSkipProtected(e.target.checked)} disabled={starting} /> Skip protected members ({estimate.protected_linked}): not scored, not X-checked. Their existing points stay as they are.</label>
         <label className="check-row"><input type="checkbox" checked={verifyX} onChange={(e) => setVerifyX(e.target.checked)} disabled={starting} /> Verify X accounts during this scan ({verifyCount} accounts · ≈ {verifyCredits.toLocaleString()} credits)</label>
         <div className="modal-actions"><button type="button" className="button ghost" onClick={() => setEstimate(undefined)} disabled={starting}>Cancel</button><button className="button primary" onClick={scan} disabled={starting}><Play size={16} />{starting ? 'Starting…' : 'Start scan'}</button></div>

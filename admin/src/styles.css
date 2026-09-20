@@ -167,3 +167,4 @@ td .muted { color: var(--muted); }
 .check-row.nested { margin-top: 10px !important; margin-left: 26px; }
 .estimate-grid div.wide { grid-column: 1 / -1; }
 .estimate-grid dd small { line-height: 1.5; }
+.estimate-warning { margin: 14px 0 0; padding: 10px 12px; border: 1px solid #6a4a20; background: #2a1f10; color: #f0c98a; font-size: 12px; line-height: 1.5; }

@@ -51,15 +51,22 @@ def parse_status_url(value: str) -> str:
 
 def parse_period(value: str) -> tuple[timedelta, str]:
     raw = value.strip().lower()
-    aliases = {"today": "24h", "day": "24h", "week": "7d", "month": "30d"}
+    aliases = {
+        "today": "24h",
+        "day": "24h",
+        "week": "7d",
+        "month": "30d",
+        "quarter": "90d",
+        "halfyear": "180d",
+    }
     raw = aliases.get(raw, raw)
     match = re.fullmatch(r"(\d{1,3})([hd])", raw)
     if not match:
-        raise ValueError("Period must look like 24h, 7d, or 30d")
+        raise ValueError("Period must look like 24h, 7d, 30d, or 90d")
     amount = int(match.group(1))
     duration = timedelta(hours=amount) if match.group(2) == "h" else timedelta(days=amount)
-    if duration < timedelta(hours=1) or duration > timedelta(days=31):
-        raise ValueError("Period must be between 1 hour and 31 days")
+    if duration < timedelta(hours=1) or duration > timedelta(days=180):
+        raise ValueError("Period must be between 1 hour and 180 days")
     return duration, raw
 
 

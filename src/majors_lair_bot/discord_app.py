@@ -334,7 +334,7 @@ class EngagementCog(commands.Cog):
         name="check-engagement", description="Scan and score a chosen recent period"
     )
     @app_commands.describe(
-        period="Examples: 24h, 7d, 30d (maximum 31d)",
+        period="Examples: 24h, 7d, 30d, 90d (maximum 180d)",
         skip_protected=(
             "Leave special-role members out of scoring and X checks "
             "(default: the skip_protected_members setting)"

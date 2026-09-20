@@ -855,12 +855,18 @@ class EngagementService:
             if not handle:
                 continue
             try:
-                tweets, _ = await self.twitter.get_recent_tweets(
+                tweets, complete = await self.twitter.get_recent_tweets(
                     handle, since=since, until=until, max_pages=source_pages
                 )
             except TwitterApiError as exc:
                 warnings.append(f"Could not read @{handle}: {exc}")
                 continue
+            if not complete:
+                warnings.append(
+                    f"Only the newest {len(tweets)} posts of @{handle} fit in the page cap; "
+                    "older posts in this window will be missed. Raise max_source_pages in "
+                    "Scoring rules for long windows."
+                )
             posts.update({tweet.tweet_id: tweet for tweet in tweets if not tweet.is_retweet})
         estimate_requests = self.twitter.request_count - before
 
