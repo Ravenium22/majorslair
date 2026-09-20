@@ -52,7 +52,8 @@ export default function OverviewPage({ session }: { session: Session }) {
   const verifyCount = estimate ? estimate.linked_members - (skipProtected ? estimate.protected_linked : 0) : 0
   const verifyCredits = verifyX ? verifyCount * (estimate?.verification_credits_per_account ?? 10) : 0
   const scanEstimate = estimate && !estimate.estimate.error ? estimate.estimate : undefined
-  const timelineCredits = readTimelines && scanEstimate ? scanEstimate.timeline_credits_if_enabled : 0
+  const timelineMembers = scanEstimate ? scanEstimate.timeline_members - (skipProtected ? Math.min(scanEstimate.timeline_members, estimate?.protected_linked ?? 0) : 0) : 0
+  const timelineCredits = readTimelines && scanEstimate ? Math.round(scanEstimate.timeline_credits_if_enabled * (timelineMembers / Math.max(1, scanEstimate.timeline_members))) : 0
   const totalLow = (scanEstimate?.credits_low ?? 0) - (scanEstimate?.timeline_pages ? 0 : 0) + verifyCredits + timelineCredits
   const totalHigh = (scanEstimate?.credits_high ?? 0) - (scanEstimate?.timeline_credits_max ?? 0) + verifyCredits + timelineCredits
   const usd = (credits: number) => `$${(credits / 100000).toFixed(2)}`
@@ -121,7 +122,7 @@ export default function OverviewPage({ session }: { session: Session }) {
         {scanEstimate?.warnings.length ? <p className="estimate-warning">{scanEstimate.warnings.join(' ')}</p> : null}
         <label className="check-row"><input type="checkbox" checked={skipProtected} onChange={(e) => setSkipProtected(e.target.checked)} disabled={starting} /> Skip protected members ({estimate.protected_linked}): not scored, not X-checked. Their existing points stay as they are.</label>
         <label className="check-row"><input type="checkbox" checked={verifyX} onChange={(e) => setVerifyX(e.target.checked)} disabled={starting} /> Verify X accounts during this scan ({verifyCount} accounts · ≈ {verifyCredits.toLocaleString()} credits)</label>
-        <label className="check-row"><input type="checkbox" checked={readTimelines} onChange={(e) => setReadTimelines(e.target.checked)} disabled={starting} /> Deep check: also read every member's own timeline to catch replies X hides everywhere else ({scanEstimate?.timeline_members ?? 0} members · ≈ {(scanEstimate?.timeline_credits_if_enabled ?? 0).toLocaleString()} credits ≈ {usd(scanEstimate?.timeline_credits_if_enabled ?? 0)}). Off again next time.</label>
+        <label className="check-row"><input type="checkbox" checked={readTimelines} onChange={(e) => setReadTimelines(e.target.checked)} disabled={starting} /> Deep check: also read every member's own timeline to catch replies X hides everywhere else ({timelineMembers} members · ≈ {(readTimelines ? timelineCredits : Math.round((scanEstimate?.timeline_credits_if_enabled ?? 0) * (timelineMembers / Math.max(1, scanEstimate?.timeline_members ?? 1)))).toLocaleString()} credits ≈ {usd(readTimelines ? timelineCredits : Math.round((scanEstimate?.timeline_credits_if_enabled ?? 0) * (timelineMembers / Math.max(1, scanEstimate?.timeline_members ?? 1))))}). Off again next time.</label>
         <div className="modal-actions"><button type="button" className="button ghost" onClick={() => setEstimate(undefined)} disabled={starting}>Cancel</button><button className="button primary" onClick={scan} disabled={starting}><Play size={16} />{starting ? 'Starting…' : 'Start scan'}</button></div>
       </div></div>}
       <section className="panel scan-history">
