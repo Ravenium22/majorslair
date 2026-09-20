@@ -544,13 +544,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 continue
             if user_id in registry:
                 continue
-            display = (
-                member.get("nick") or user.get("global_name") or user.get("username") or user_id
-            )
+            # Store the Discord handle (username), not the nickname, so the registry matches
+            # what admins see in profiles and what /link-twitter records.
+            handle = user.get("username") or user.get("global_name") or user_id
             await runtime.repository.register_member(
-                discord_user_id=user_id, discord_username=str(display)[:120]
+                discord_user_id=user_id, discord_username=str(handle)[:120]
             )
-            added.append({"discord_user_id": user_id, "discord_username": str(display)})
+            added.append({"discord_user_id": user_id, "discord_username": str(handle)})
 
         discord_ids = {
             str((m.get("user") or {}).get("id") or "")
