@@ -1,5 +1,5 @@
 import { Fragment, useState } from 'react'
-import { ChevronDown, ChevronRight, ScrollText } from 'lucide-react'
+import { ChevronDown, ChevronRight, Download, ScrollText } from 'lucide-react'
 import useSWR from 'swr'
 import { api, formatDate, formatScore } from '../api'
 import { Empty, PageHeader, Pagination, Status } from '../components'
@@ -13,6 +13,23 @@ function credits(summary: ScanRun['summary']) {
   const requests = Number(summary.api_requests ?? 0)
   const checked = Number(summary.x_checked ?? 0)
   return Math.max(items, requests) * 15 + checked * 10
+}
+
+const csvCell = (value: unknown) => { const text = String(value ?? ''); return /[",
+]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text }
+
+function downloadStandings(run: ScanRun) {
+  const rows = run.summary.standings ?? []
+  const header = ['rank', 'discord_username', 'discord_id', 'x_handle', 'points', 'points_before_scan', 'change', 'protected', 'x_status']
+  const lines = rows.map((row, index) => [index + 1, row.discord_username, row.discord_user_id, row.twitter_handle, row.score, row.before, +(row.score - row.before).toFixed(2), row.special_role ? 'YES' : 'NO', row.x_status || 'ok'].map(csvCell).join(','))
+  const blob = new Blob(['﻿' + [header.join(','), ...lines].join('
+')], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = `majors-lair-points-${run.period}-${run.started_at.slice(0, 16).replace(/[:T]/g, '-')}.csv`
+  anchor.click()
+  URL.revokeObjectURL(url)
 }
 
 function duration(run: ScanRun) {
@@ -36,6 +53,7 @@ export default function ScansPage() {
           const unavailable = Array.isArray(s.x_unavailable) ? s.x_unavailable : []
           const renamed = Array.isArray(s.x_renamed) ? s.x_renamed : []
           const warnings = Array.isArray(s.warnings) ? (s.warnings as string[]) : []
+          const standings = Array.isArray(s.standings) ? s.standings : []
           const cost = credits(s)
           const expanded = open === run.scan_id
           return <Fragment key={run.scan_id}>
@@ -83,6 +101,7 @@ export default function ScansPage() {
               {unavailable.length > 0 && <section className="report-block"><h4>Could not verify these X accounts</h4><div className="table-wrap"><table><tbody>{unavailable.map((item) => <tr key={String(item.discord_user_id)}><td><span className="member-cell"><strong>{String(item.discord_username)}</strong><small className="mono">{String(item.discord_user_id)}</small></span></td><td><a href={`https://x.com/${String(item.twitter_handle)}`} target="_blank">@{String(item.twitter_handle)}</a></td><td><span className="status failed"><i />{String(item.status)}</span></td><td className="muted">{String(item.reason ?? '')}</td></tr>)}</tbody></table></div></section>}
               {renamed.length > 0 && <section className="report-block"><h4>Handles updated automatically</h4><div className="table-wrap"><table><tbody>{renamed.map((item) => <tr key={String(item.discord_user_id)}><td><span className="member-cell"><strong>{String(item.discord_username)}</strong><small className="mono">{String(item.discord_user_id)}</small></span></td><td className="muted">@{String(item.old_handle)} → @{String(item.new_handle)}</td></tr>)}</tbody></table></div></section>}
               {changes.length > 0 && <section className="report-block"><h4>Points moved by this scan</h4><div className="table-wrap"><table><thead><tr><th>Member</th><th>X</th><th>Before</th><th>After</th><th>Change</th></tr></thead><tbody>{changes.map((item) => { const delta = Number(item.after) - Number(item.before); return <tr key={String(item.discord_user_id)}><td><span className="member-cell"><strong>{String(item.discord_username)}</strong><small className="mono">{String(item.discord_user_id)}</small></span></td><td>{item.twitter_handle ? <a href={`https://x.com/${String(item.twitter_handle)}`} target="_blank">@{String(item.twitter_handle)}</a> : <span className="muted">—</span>}</td><td className="score">{formatScore(Number(item.before))}</td><td className="score">{formatScore(Number(item.after))}</td><td className={`score ${delta >= 0 ? 'gain' : 'loss'}`}>{delta >= 0 ? '+' : ''}{formatScore(delta)}</td></tr> })}</tbody></table></div>{Number(s.score_changes_total ?? changes.length) > changes.length && <p className="muted small">Showing the {changes.length} largest of {String(s.score_changes_total)} changes.</p>}</section>}
+              {standings.length > 0 && <section className="report-block"><div className="report-head"><h4>Everyone's points after this scan ({standings.length} members)</h4><button className="button" onClick={(e) => { e.stopPropagation(); downloadStandings(run) }}><Download size={15} /> Download sheet (CSV)</button></div><div className="table-wrap standings-table"><table><thead><tr><th>#</th><th>Discord</th><th>X</th><th>Points</th><th>This scan</th><th>Protected</th></tr></thead><tbody>{standings.map((row, index) => { const delta = row.score - row.before; return <tr key={row.discord_user_id}><td className="mono">{index + 1}</td><td><span className="member-cell"><strong>{row.discord_username}</strong><small className="mono">{row.discord_user_id}</small></span></td><td>{row.twitter_handle ? <a href={`https://x.com/${row.twitter_handle}`} target="_blank">@{row.twitter_handle}</a> : <span className="muted">not linked</span>}</td><td className="score">{formatScore(row.score)}</td><td className={`score ${delta > 0 ? 'gain' : delta < 0 ? 'loss' : 'muted'}`}>{delta === 0 ? '—' : `${delta > 0 ? '+' : ''}${formatScore(delta)}`}</td><td>{row.special_role ? <span className="status complete"><i />Yes</span> : <span className="muted">—</span>}</td></tr> })}</tbody></table></div></section>}
               {warnings.length > 0 && <section className="report-block"><h4>Warnings</h4><ul className="warning-list">{warnings.map((w, i) => <li key={i}>{w}</li>)}</ul></section>}
             </td></tr>}
           </Fragment>

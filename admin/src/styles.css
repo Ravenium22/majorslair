@@ -180,3 +180,5 @@ td .muted { color: var(--muted); }
 .score.gain { color: var(--green); }.score.loss { color: var(--red); }
 .warning-list { margin: 0; padding-left: 18px; color: #f0c98a; font-size: 12px; line-height: 1.6; }
 .muted.small { font-size: 11px; color: var(--muted); }.page-note { display: flex; align-items: center; gap: 6px; margin: 14px 0 0; }
+.report-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }.report-head h4 { margin: 0; }
+.standings-table { max-height: 420px; overflow: auto; border: 1px solid var(--line-soft); }.standings-table thead th { position: sticky; top: 0; }

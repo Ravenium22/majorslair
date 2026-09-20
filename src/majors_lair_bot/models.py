@@ -116,3 +116,6 @@ class ScanSummary:
     x_renamed: list[dict[str, str]] = field(default_factory=list)
     score_changes: list[dict[str, Any]] = field(default_factory=list)
     score_changes_total: int = 0
+    # Every active member's points right after this scan, so each report carries a full
+    # sheet even after later scans or a leaderboard reset.
+    standings: list[dict[str, Any]] = field(default_factory=list)

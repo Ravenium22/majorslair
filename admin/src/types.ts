@@ -46,6 +46,7 @@ export type ScanRun = {
     x_unavailable?: { discord_user_id: string; discord_username: string; twitter_handle: string; status: string; reason: string }[]
     x_renamed?: { discord_user_id: string; discord_username: string; old_handle: string; new_handle: string }[]
     warnings?: string[]
+    standings?: { discord_user_id: string; discord_username: string; twitter_handle: string; before: number; score: number; special_role: boolean; x_status: string }[]
   }
   error: string
 }

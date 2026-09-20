@@ -780,8 +780,20 @@ class EngagementService:
             )
             await self.rescore_current_cycle(config=config)
             changes = []
+            standings = []
             for user in await self.repository.list_users(active_only=True):
                 before = scores_before.get(user.discord_user_id, 0.0)
+                standings.append(
+                    {
+                        "discord_user_id": user.discord_user_id,
+                        "discord_username": user.discord_username,
+                        "twitter_handle": user.twitter_handle,
+                        "before": round(before, 2),
+                        "score": round(user.score, 2),
+                        "special_role": user.special_role,
+                        "x_status": user.x_status,
+                    }
+                )
                 if abs(user.score - before) > 1e-9:
                     changes.append(
                         {
@@ -795,6 +807,8 @@ class EngagementService:
             changes.sort(key=lambda item: item["after"] - item["before"], reverse=True)
             summary.score_changes_total = len(changes)
             summary.score_changes = changes[:100]
+            standings.sort(key=lambda item: (-item["score"], item["discord_username"].lower()))
+            summary.standings = standings
             if verify_x:
                 await self.verify_linked_accounts(
                     actor_discord_id=actor_discord_id,
