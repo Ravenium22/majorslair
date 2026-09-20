@@ -136,6 +136,8 @@ export type ScanEstimate = {
     engagement_credits: number
     mentions_credits_max: number
     sweep_credits_max: number
+    timeline_credits_max: number
+    timeline_pages: number
     credits_low: number
     credits_high: number
     usd_low: number
@@ -188,5 +190,6 @@ export type Diagnosis = {
   parent?: { tweet_id: string; author_handle: string; created_at: string; url: string; tracked: boolean; reply_count: number | null }
   reply_endpoint?: { found: boolean; returned: number; complete: boolean }
   sweep?: { found: boolean; returned: number; complete: boolean }
+  timeline?: { found: boolean; returned: number; enabled: boolean }
 }
 

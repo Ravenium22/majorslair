@@ -93,6 +93,7 @@ export default function ScansPage() {
                     <div><dt>Retweets</dt><dd>{String(s.retweets ?? 0)}</dd></div>
                     <div><dt>Mentions</dt><dd>{String(s.mentions ?? 0)}</dd></div>
                     <div><dt>Replies found only by sweep</dt><dd>{String(s.swept_replies ?? 0)}</dd></div>
+                    <div><dt>Replies found only in member timelines</dt><dd>{String(s.timeline_replies ?? 0)}<small>{s.timeline_members_checked ? ` of ${String(s.timeline_members_checked)} members checked` : ''}</small></dd></div>
                     <div><dt>Source posts</dt><dd>{String(s.source_posts ?? 0)}</dd></div>
                     <div><dt>Log entries changed</dt><dd>{String(s.changed_actions ?? 0)}</dd></div>
                     <div><dt>Actions from unlinked people</dt><dd>{String(s.skipped_unlinked ?? 0)}</dd></div>

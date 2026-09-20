@@ -294,3 +294,101 @@ async def test_reply_sweep_counts_hidden_replies_once(repository: DatabaseReposi
     assert actions[0].action_type is ActionType.REPLY
     assert actions[0].source_post_id == "500" and actions[0].target_handle == "majorslair"
     assert summary.swept_replies == 1 and "901" in counted
+
+
+@pytest.mark.asyncio
+async def test_member_timeline_path_counts_replies_to_targets_only(
+    repository: DatabaseRepository,
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from majors_lair_bot.models import ScanSummary, Tweet
+    from majors_lair_bot.scoring import DEFAULT_CONFIG, ScoringRules
+
+    now = datetime.now(UTC)
+
+    class TimelineTwitter(FakeTwitter):
+        async def get_user_timeline_with_replies(
+            self, handle: str, **_: object
+        ) -> tuple[list[Tweet], bool]:
+            self.lookups.append(handle)
+            return (
+                [
+                    Tweet(
+                        "1",
+                        "cokkk",
+                        "77",
+                        handle,
+                        now,
+                        is_reply=True,
+                        reply_to_tweet_id="500",
+                        reply_to_handle="majorslair",
+                    ),
+                    Tweet(
+                        "2",
+                        "nice",
+                        "77",
+                        handle,
+                        now,
+                        is_reply=True,
+                        reply_to_tweet_id="600",
+                        reply_to_handle="someone_else",
+                    ),
+                    Tweet(
+                        "3",
+                        "already",
+                        "77",
+                        handle,
+                        now,
+                        is_reply=True,
+                        reply_to_tweet_id="700",
+                        reply_to_handle="m_m3l",
+                    ),
+                    Tweet("4", "standalone", "77", handle, now),
+                ],
+                True,
+            )
+
+    twitter = TimelineTwitter({})
+    service = EngagementService(repository, twitter)  # type: ignore[arg-type]
+    await repository.link_user(
+        discord_user_id="7", discord_username="oluwa", twitter_handle="oluwa", twitter_user_id="77"
+    )
+    await repository.register_member(discord_user_id="8", discord_username="nox")
+    users = await repository.list_users(active_only=True)
+    summary = ScanSummary(period_label="7d")
+    counted = {"3"}
+
+    actions = await service._collect_member_timelines(
+        rules=ScoringRules.from_mapping(DEFAULT_CONFIG),
+        cycle_id="cycle_initial",
+        since=now - timedelta(days=7),
+        until=now,
+        max_pages=2,
+        users=users,
+        already_counted_tweet_ids=counted,
+        summary=summary,
+    )
+
+    assert twitter.lookups == ["oluwa"]  # members without X are never fetched
+    assert [(a.action_tweet_id, a.target_handle, a.source_post_id) for a in actions] == [
+        ("1", "majorslair", "500")
+    ]
+    assert summary.timeline_replies == 1 and summary.timeline_members_checked == 1
+
+    # Off by default: max_pages 0 does nothing and costs nothing.
+    twitter.lookups.clear()
+    assert (
+        await service._collect_member_timelines(
+            rules=ScoringRules.from_mapping(DEFAULT_CONFIG),
+            cycle_id="c",
+            since=now,
+            until=now,
+            max_pages=0,
+            users=users,
+            already_counted_tweet_ids=set(),
+            summary=summary,
+        )
+        == []
+    )
+    assert twitter.lookups == []

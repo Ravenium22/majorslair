@@ -317,9 +317,35 @@ class EngagementService:
             "The reply sweep (search to:@account) returned it, so the next scan will log it."
             if in_sweep
             else f"The reply sweep also does NOT return it ({len(sweep_ids)} replies in a "
-            "two-day window). X excludes it from search as well; the bot cannot see it "
-            "through any public listing."
+            "two-day window). X excludes it from search as well."
         )
+
+        timeline, _ = await self.twitter.get_user_timeline_with_replies(
+            tweet.author_handle, since=window_since, until=window_until, max_pages=3
+        )
+        in_timeline = any(item.tweet_id == tweet_id for item in timeline)
+        timeline_pages = self._config_int(config, "member_timeline_pages")
+        result["timeline"] = {
+            "found": in_timeline,
+            "returned": len(timeline),
+            "enabled": timeline_pages > 0,
+        }
+        if in_timeline and timeline_pages > 0:
+            findings.append(
+                "The author's own timeline shows it and the timeline path is on, so the next "
+                "scan will log it."
+            )
+        elif in_timeline:
+            findings.append(
+                "The author's own timeline shows it. Set member_timeline_pages in Scoring rules "
+                "to 1 or more and the next scan will log it (about 300 credits per member per "
+                "page)."
+            )
+        else:
+            findings.append(
+                "Even the author's own timeline does not return it in this window; the bot has "
+                "no way to see it."
+            )
         return result
 
     async def verify_linked_accounts(
@@ -804,6 +830,71 @@ class EngagementService:
                 )
         return actions
 
+    async def _collect_member_timelines(
+        self,
+        *,
+        rules: ScoringRules,
+        cycle_id: str,
+        since: datetime,
+        until: datetime,
+        max_pages: int,
+        users: list[LinkedUser],
+        already_counted_tweet_ids: set[str],
+        summary: ScanSummary,
+        concurrency: int = 4,
+    ) -> list[EngagementAction]:
+        """Third reply path: each member's own timeline, which X never filters."""
+        if max_pages <= 0:
+            return []
+        targets = {rules.primary_handle, rules.secondary_handle} - {""}
+        linked = [user for user in users if user.twitter_user_id and user.twitter_handle]
+        semaphore = asyncio.Semaphore(max(1, concurrency))
+        actions: list[EngagementAction] = []
+        failures = 0
+
+        async def one(user: LinkedUser) -> list[EngagementAction]:
+            nonlocal failures
+            async with semaphore:
+                try:
+                    tweets, _ = await self.twitter.get_user_timeline_with_replies(
+                        user.twitter_handle, since=since, until=until, max_pages=max_pages
+                    )
+                except TwitterApiError:
+                    failures += 1
+                    return []
+            found: list[EngagementAction] = []
+            for tweet in tweets:
+                if tweet.is_retweet or not tweet.reply_to_tweet_id:
+                    continue
+                if tweet.reply_to_handle not in targets:
+                    continue
+                if tweet.tweet_id in already_counted_tweet_ids:
+                    continue
+                already_counted_tweet_ids.add(tweet.tweet_id)
+                found.append(
+                    self._make_action(
+                        cycle_id=cycle_id,
+                        user=user,
+                        action_type=ActionType.REPLY,
+                        target_handle=tweet.reply_to_handle,
+                        source_post_id=tweet.reply_to_tweet_id,
+                        action_tweet_id=tweet.tweet_id,
+                        action_url=tweet.url,
+                        text=tweet.text,
+                        has_media=tweet.has_media,
+                        occurred_at=tweet.created_at,
+                    )
+                )
+            return found
+
+        for batch in await asyncio.gather(*(one(user) for user in linked)):
+            actions.extend(batch)
+        summary.timeline_members_checked = len(linked)
+        summary.timeline_replies = len(actions)
+        if failures:
+            summary.warnings.append(f"Timeline check failed for {failures} member(s)")
+        return actions
+
     async def _collect_mentions(
         self,
         *,
@@ -1000,6 +1091,17 @@ class EngagementService:
                 summary=summary,
             )
             discovered.extend(swept)
+            from_timelines = await self._collect_member_timelines(
+                rules=rules,
+                cycle_id=cycle_id,
+                since=since,
+                until=until,
+                max_pages=self._config_int(config, "member_timeline_pages"),
+                users=users,
+                already_counted_tweet_ids=counted_ids,
+                summary=summary,
+            )
+            discovered.extend(from_timelines)
             mentions, mention_scopes = await self._collect_mentions(
                 rules=rules,
                 cycle_id=cycle_id,
@@ -1161,8 +1263,19 @@ class EngagementService:
         mentions_credits_max = mention_cap * credit_per_item * 2
         sweep_cap = self._config_int(config, "max_reply_search_pages") * page_size
         sweep_credits_max = sweep_cap * credit_per_item * 2
-        low = source_credits + engagement_credits
-        high = low + mentions_credits_max + sweep_credits_max
+        timeline_pages = self._config_int(config, "member_timeline_pages")
+        linked_members = sum(
+            1 for user in await self.repository.list_users(active_only=True) if user.twitter_user_id
+        )
+        timeline_credits_max = (
+            linked_members * timeline_pages * page_size * credit_per_item if timeline_pages else 0
+        )
+        low = (
+            source_credits
+            + engagement_credits
+            + (linked_members * credit_per_item if timeline_pages else 0)
+        )
+        high = low + mentions_credits_max + sweep_credits_max + timeline_credits_max
         result = {
             "period": period_label,
             "since": isoformat(since),
@@ -1173,6 +1286,8 @@ class EngagementService:
             "engagement_credits": engagement_credits,
             "mentions_credits_max": mentions_credits_max,
             "sweep_credits_max": sweep_credits_max,
+            "timeline_credits_max": timeline_credits_max,
+            "timeline_pages": timeline_pages,
             "credits_low": low,
             "credits_high": high,
             "usd_low": round(low / 100_000, 2),
