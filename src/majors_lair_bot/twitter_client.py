@@ -172,6 +172,20 @@ def parse_tweet(record: dict[str, Any]) -> Tweet:
         reply_to_tweet_id=reply_to,
         quoted_tweet_id=quoted_id,
         is_retweet=is_retweet,
+        reply_to_handle=str(
+            deep_get(
+                raw,
+                (
+                    ("inReplyToUsername",),
+                    ("in_reply_to_screen_name",),
+                    ("legacy", "in_reply_to_screen_name"),
+                ),
+                default="",
+            )
+            or ""
+        )
+        .removeprefix("@")
+        .lower(),
         reply_count=_count("replyCount", "reply_count"),
         quote_count=_count("quoteCount", "quote_count"),
         retweet_count=_count("retweetCount", "retweet_count"),
@@ -382,6 +396,41 @@ class TwitterApiClient:
                 LOGGER.warning("Skipping malformed source tweet: %s", exc)
                 continue
             if since <= tweet.created_at <= until and not tweet.is_reply and not tweet.is_retweet:
+                tweets.append(tweet)
+        return tweets, result.complete
+
+    async def get_user_timeline_with_replies(
+        self, handle: str, *, since: datetime, until: datetime, max_pages: int
+    ) -> tuple[list[Tweet], bool]:
+        """A member's own recent tweets including replies, newest first, back to ``since``.
+
+        The only listing X never filters: it shows a member's replies even when the parent
+        post's reply list and search hide them.
+        """
+
+        def reached_cutoff(page_items: list[dict[str, Any]]) -> bool:
+            parsed_dates = []
+            for item in page_items:
+                try:
+                    parsed_dates.append(parse_tweet(item).created_at)
+                except (ValueError, TypeError):
+                    continue
+            return bool(parsed_dates) and min(parsed_dates) < since
+
+        result = await self._paginate(
+            "/twitter/user/last_tweets",
+            params={"userName": handle, "includeReplies": "true"},
+            item_key="tweets",
+            max_pages=max_pages,
+            stop_when=reached_cutoff,
+        )
+        tweets = []
+        for item in result.items:
+            try:
+                tweet = parse_tweet(item)
+            except (ValueError, TypeError):
+                continue
+            if since <= tweet.created_at <= until:
                 tweets.append(tweet)
         return tweets, result.complete
 

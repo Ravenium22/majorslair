@@ -43,6 +43,7 @@ class Tweet:
     reply_to_tweet_id: str = ""
     quoted_tweet_id: str = ""
     is_retweet: bool = False
+    reply_to_handle: str = ""
     reply_count: int = 0
     quote_count: int = 0
     retweet_count: int = 0
@@ -107,6 +108,8 @@ class ScanSummary:
     skipped_unlinked: int = 0
     skipped_protected: int = 0
     swept_replies: int = 0
+    timeline_replies: int = 0
+    timeline_members_checked: int = 0
     incomplete_scopes: int = 0
     api_requests: int = 0
     tweets_returned: int = 0
