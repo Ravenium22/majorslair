@@ -392,3 +392,17 @@ async def test_member_timeline_path_counts_replies_to_targets_only(
         == []
     )
     assert twitter.lookups == []
+
+
+def test_config_int_respects_zero_for_optional_paths() -> None:
+    from majors_lair_bot.scoring import DEFAULT_CONFIG
+
+    assert EngagementService._config_int(DEFAULT_CONFIG, "member_timeline_pages", minimum=0) == 0
+    assert (
+        EngagementService._config_int(
+            {"member_timeline_pages": "2"}, "member_timeline_pages", minimum=0
+        )
+        == 2
+    )
+    assert EngagementService._config_int({"max_source_pages": "0"}, "max_source_pages") == 1
+    assert EngagementService._config_int({"max_source_pages": "junk"}, "max_source_pages") == 50

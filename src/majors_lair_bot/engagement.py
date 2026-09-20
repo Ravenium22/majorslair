@@ -324,7 +324,7 @@ class EngagementService:
             tweet.author_handle, since=window_since, until=window_until, max_pages=3
         )
         in_timeline = any(item.tweet_id == tweet_id for item in timeline)
-        timeline_pages = self._config_int(config, "member_timeline_pages")
+        timeline_pages = self._config_int(config, "member_timeline_pages", minimum=0)
         result["timeline"] = {
             "found": in_timeline,
             "returned": len(timeline),
@@ -485,8 +485,13 @@ class EngagementService:
         return tweet
 
     @staticmethod
-    def _config_int(config: dict[str, str], key: str) -> int:
-        return max(1, int(config.get(key, DEFAULT_CONFIG[key])))
+    def _config_int(config: dict[str, str], key: str, *, minimum: int = 1) -> int:
+        """Integer setting with a floor; settings where 0 means "off" pass ``minimum=0``."""
+        try:
+            value = int(str(config.get(key, DEFAULT_CONFIG[key])).strip() or 0)
+        except ValueError:
+            value = int(DEFAULT_CONFIG[key])
+        return max(minimum, value)
 
     @staticmethod
     def _user_indexes(
@@ -1096,7 +1101,7 @@ class EngagementService:
                 cycle_id=cycle_id,
                 since=since,
                 until=until,
-                max_pages=self._config_int(config, "member_timeline_pages"),
+                max_pages=self._config_int(config, "member_timeline_pages", minimum=0),
                 users=users,
                 already_counted_tweet_ids=counted_ids,
                 summary=summary,
@@ -1263,7 +1268,7 @@ class EngagementService:
         mentions_credits_max = mention_cap * credit_per_item * 2
         sweep_cap = self._config_int(config, "max_reply_search_pages") * page_size
         sweep_credits_max = sweep_cap * credit_per_item * 2
-        timeline_pages = self._config_int(config, "member_timeline_pages")
+        timeline_pages = self._config_int(config, "member_timeline_pages", minimum=0)
         linked_members = sum(
             1 for user in await self.repository.list_users(active_only=True) if user.twitter_user_id
         )
