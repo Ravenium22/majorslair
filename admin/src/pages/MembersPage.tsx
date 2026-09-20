@@ -1,5 +1,5 @@
 import { useMemo, useState, type ChangeEvent, type FormEvent } from 'react'
-import { BadgeCheck, FileUp, Plus, RefreshCw, Search, Shield, ShieldCheck, ShieldOff, UserRoundCheck, UserRoundX } from 'lucide-react'
+import { BadgeCheck, Download, FileUp, Plus, RefreshCw, Search, Shield, ShieldCheck, ShieldOff, UserRoundCheck, UserRoundX } from 'lucide-react'
 import useSWR from 'swr'
 import { api, formatDate, formatScore, mutateApi } from '../api'
 import { Empty, PageHeader, Pagination, Toast } from '../components'
@@ -13,14 +13,34 @@ const SEGMENTS = [
   { id: 'everyone', label: 'Everyone', query: {} },
   { id: 'linked', label: 'Linked to X', query: { linked: 'true' } },
   { id: 'unlinked', label: 'No X yet', query: { linked: 'false' } },
-  { id: 'protected', label: 'Protected', query: { protected: 'true' } },
   { id: 'xissues', label: 'X suspended', query: { x_ok: 'false' } },
+] as const
+const PROTECTION = [
+  { id: 'any', label: 'Any role', query: {} },
+  { id: 'protected', label: 'Protected', query: { protected: 'true' } },
+  { id: 'regular', label: 'Not protected', query: { protected: 'false' } },
+] as const
+const POINTS = [
+  { id: 'any', label: 'Any points' },
+  { id: 'positive', label: 'Has points' },
+  { id: 'zero', label: '0 points' },
+  { id: 'low', label: 'Low activity' },
+] as const
+const SORTS = [
+  { id: 'score_desc', label: 'Points: high to low' },
+  { id: 'score_asc', label: 'Points: low to high' },
+  { id: 'name', label: 'Discord handle A→Z' },
+  { id: 'last_signal', label: 'Most recent activity' },
+  { id: 'linked_at', label: 'Recently added' },
 ] as const
 
 export default function MembersPage({ session }: { session: Session }) {
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState('active')
   const [segment, setSegment] = useState<(typeof SEGMENTS)[number]['id']>('everyone')
+  const [protection, setProtection] = useState<(typeof PROTECTION)[number]['id']>('any')
+  const [points, setPoints] = useState<(typeof POINTS)[number]['id']>('any')
+  const [sort, setSort] = useState<(typeof SORTS)[number]['id']>('score_desc')
   const [page, setPage] = useState(1)
   const [showLink, setShowLink] = useState(false)
   const [showImport, setShowImport] = useState(false)
@@ -35,12 +55,19 @@ export default function MembersPage({ session }: { session: Session }) {
   const [verifyPlan, setVerifyPlan] = useState<{ linked: number; protectedLinked: number }>()
   const [skipProtected, setSkipProtected] = useState(false)
   const [notice, setNotice] = useState<{ text: string; kind: 'success' | 'error' }>()
-  const query = useMemo(() => new URLSearchParams({
-    search, page: String(page), page_size: '25',
+  const filterQuery = useMemo(() => new URLSearchParams({
+    search,
     ...(filter !== 'all' ? { active: String(filter === 'active') } : {}),
     ...SEGMENTS.find((item) => item.id === segment)?.query,
-  }).toString(), [search, filter, segment, page])
+    ...PROTECTION.find((item) => item.id === protection)?.query,
+    ...(points !== 'any' ? { points } : {}),
+    ...(sort !== 'score_desc' ? { sort } : {}),
+  }).toString(), [search, filter, segment, protection, points, sort])
+  const query = `${filterQuery}&page=${page}&page_size=25`
   const { data, mutate, isLoading } = useSWR<Paginated<LinkedUser>>(`/api/users?${query}`, api)
+  const resetPage = <T,>(setter: (value: T) => void) => (value: T) => { setter(value); setPage(1) }
+  const hasFilters = Boolean(search) || filter !== 'active' || segment !== 'everyone' || protection !== 'any' || points !== 'any'
+  const clearFilters = () => { setSearch(''); setFilter('active'); setSegment('everyone'); setProtection('any'); setPoints('any'); setSort('score_desc'); setPage(1) }
 
   const patch = async (user: LinkedUser, body: Record<string, unknown>, success: string) => {
     try {
@@ -133,14 +160,21 @@ export default function MembersPage({ session }: { session: Session }) {
       <button className="button" onClick={openVerify} disabled={verifying} title="Check linked X accounts for suspensions, deletions, and renames (about 10 credits each)"><BadgeCheck size={17} className={verifying ? 'spin' : ''} /> {verifying ? 'Checking X…' : 'Verify X accounts'}</button>
       <button className="button" onClick={runSync} disabled={syncing} title="Register every human member of the Discord server who is missing here"><RefreshCw size={17} className={syncing ? 'spin' : ''} /> {syncing ? 'Syncing…' : 'Sync from Discord'}</button>
       <button className="button" onClick={() => setShowImport(true)}><FileUp size={17} /> Import CSV</button>
+      <a className="button" href={`/api/users/export?${filterQuery}`} title="Download the list exactly as filtered below"><Download size={17} /> Export CSV</a>
       <button className="button primary" onClick={() => setShowLink(true)}><Plus size={17} /> Link member</button>
     </>} />
     {notice && <Toast message={notice.text} kind={notice.kind} />}
     <section className="panel">
-      <div className="toolbar">
+      <div className="toolbar filters">
         <label className="search"><Search size={17} /><input value={search} onChange={(e) => { setSearch(e.target.value); setPage(1) }} placeholder="Search Discord handle, X handle, ID, or role" /></label>
-        <div className="segmented">{SEGMENTS.map((item) => <button className={segment === item.id ? 'active' : ''} onClick={() => { setSegment(item.id); setPage(1) }} key={item.id}>{item.label}</button>)}</div>
-        <div className="segmented">{['active', 'inactive', 'all'].map((value) => <button className={filter === value ? 'active' : ''} onClick={() => { setFilter(value); setPage(1) }} key={value}>{value}</button>)}</div>
+        <select value={sort} onChange={(e) => resetPage(setSort)(e.target.value as typeof sort)} aria-label="Sort">{SORTS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select>
+      </div>
+      <div className="toolbar filters wrap">
+        <div className="segmented">{SEGMENTS.map((item) => <button className={segment === item.id ? 'active' : ''} onClick={() => resetPage(setSegment)(item.id)} key={item.id}>{item.label}</button>)}</div>
+        <div className="segmented">{PROTECTION.map((item) => <button className={protection === item.id ? 'active' : ''} onClick={() => resetPage(setProtection)(item.id)} key={item.id}>{item.label}</button>)}</div>
+        <div className="segmented">{POINTS.map((item) => <button className={points === item.id ? 'active' : ''} onClick={() => resetPage(setPoints)(item.id)} key={item.id} title={item.id === 'low' ? 'At or below the low-activity threshold from Scoring rules' : undefined}>{item.label}</button>)}</div>
+        <div className="segmented">{['active', 'inactive', 'all'].map((value) => <button className={filter === value ? 'active' : ''} onClick={() => resetPage(setFilter)(value)} key={value}>{value}</button>)}</div>
+        <span className="filter-count">{data ? `${data.total.toLocaleString()} member${data.total === 1 ? '' : 's'}` : ''}{hasFilters && <button className="link-button" onClick={clearFilters}>Clear filters</button>}</span>
       </div>
       <div className="table-wrap"><table><thead><tr><th>Discord</th><th>X identity</th><th>Special role</th><th>Score</th><th>Last signal</th><th>Status</th><th aria-label="Actions" /></tr></thead><tbody>
         {data?.items.map((user) => <tr key={user.discord_user_id}>

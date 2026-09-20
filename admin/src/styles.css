@@ -182,3 +182,8 @@ td .muted { color: var(--muted); }
 .muted.small { font-size: 11px; color: var(--muted); }.page-note { display: flex; align-items: center; gap: 6px; margin: 14px 0 0; }
 .report-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }.report-head h4 { margin: 0; }
 .standings-table { max-height: 420px; overflow: auto; border: 1px solid var(--line-soft); }.standings-table thead th { position: sticky; top: 0; }
+.toolbar.filters { flex-wrap: wrap; row-gap: 10px; }.toolbar.filters.wrap { padding-top: 12px; padding-bottom: 12px; }
+.toolbar.filters select { margin: 0; width: auto; min-width: 200px; }
+.filter-count { margin-left: auto; display: inline-flex; align-items: center; gap: 12px; color: var(--muted); font: 10px "Cascadia Mono", Consolas, monospace; letter-spacing: .05em; text-transform: uppercase; white-space: nowrap; }
+.link-button { padding: 0; border: 0; background: none; color: var(--amber); font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+a.button { text-decoration: none; }

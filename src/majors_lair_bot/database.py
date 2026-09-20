@@ -736,9 +736,17 @@ class DatabaseRepository:
         protected: bool | None = None,
         linked: bool | None = None,
         x_ok: bool | None = None,
+        points: str = "any",
+        low_threshold: float | None = None,
+        sort: str = "score_desc",
         page: int = 1,
         page_size: int = 50,
     ) -> dict[str, Any]:
+        """Filter and sort the registry.
+
+        ``points`` is one of any / positive / zero / low (at or below ``low_threshold``).
+        ``sort`` is one of score_desc, score_asc, name, last_signal, linked_at.
+        """
         filters = []
         if search:
             pattern = f"%{search.strip()}%"
@@ -760,11 +768,24 @@ class DatabaseRepository:
         if x_ok is not None:
             healthy = UserRow.x_status.in_(["", "ok"])
             filters.append(healthy if x_ok else ~healthy)
+        if points == "positive":
+            filters.append(UserRow.score > 0)
+        elif points == "zero":
+            filters.append(UserRow.score <= 0)
+        elif points == "low" and low_threshold is not None:
+            filters.append(UserRow.score <= low_threshold)
+        orders = {
+            "score_desc": (UserRow.score.desc(), UserRow.discord_username),
+            "score_asc": (UserRow.score.asc(), UserRow.discord_username),
+            "name": (func.lower(UserRow.discord_username),),
+            "last_signal": (UserRow.last_active_at.desc().nulls_last(), UserRow.discord_username),
+            "linked_at": (UserRow.linked_at.desc(), UserRow.discord_username),
+        }
         count_statement = select(func.count()).select_from(UserRow).where(*filters)
         statement = (
             select(UserRow)
             .where(*filters)
-            .order_by(UserRow.score.desc(), UserRow.discord_username)
+            .order_by(*orders.get(sort, orders["score_desc"]))
             .offset((page - 1) * page_size)
             .limit(page_size)
         )
@@ -894,6 +915,25 @@ class DatabaseRepository:
             "summary": row.summary,
             "error": row.error,
         }
+
+    async def fail_stale_scans(self, reason: str) -> int:
+        """Mark scans still flagged as running as failed; used after a restart.
+
+        A scan only lives in memory while it runs, so a deploy or crash mid-scan would
+        otherwise leave its report stuck on "running" forever.
+        """
+        async with self.sessions.begin() as session:
+            rows = (
+                await session.scalars(
+                    select(ScanRunRow).where(ScanRunRow.status == "running").with_for_update()
+                )
+            ).all()
+            now = utc_now()
+            for row in rows:
+                row.status = "failed"
+                row.completed_at = now
+                row.error = reason[:4000]
+            return len(rows)
 
     async def create_scan_run(self, *, period: str, triggered_by: str, source: str) -> str:
         scan_id = str(uuid.uuid4())

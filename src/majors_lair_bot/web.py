@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
 import logging
 import secrets
 import time
@@ -49,6 +51,12 @@ class AppRuntime:
 
     async def start(self) -> None:
         await self.repository.ensure_schema()
+        stale = await self.repository.fail_stale_scans(
+            "Interrupted: the bot restarted (deploy or crash) while this scan was running. "
+            "Nothing was scored; run it again."
+        )
+        if stale:
+            LOGGER.warning("Marked %s interrupted scan(s) as failed after restart", stale)
         await self.twitter.start()
         if self.settings.run_discord_bot:
             self.bot = EngagementBot(
@@ -373,18 +381,97 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         protected: bool | None = None,
         linked: bool | None = None,
         x_ok: bool | None = None,
+        points: str = "any",
+        sort: str = "score_desc",
         page: int = 1,
         page_size: int = 50,
     ) -> dict[str, Any]:
         page, page_size = _page(page, page_size)
+        threshold = None
+        if points == "low":
+            config_values = await runtime.repository.get_config()
+            threshold = float(config_values["low_activity_threshold"])
         return await runtime.repository.paginated_users(
             search=search,
             active=active,
             protected=protected,
             linked=linked,
             x_ok=x_ok,
+            points=points,
+            low_threshold=threshold,
+            sort=sort,
             page=page,
             page_size=page_size,
+        )
+
+    @app.get("/api/users/export")
+    async def export_users(
+        _: Admin,
+        search: str = "",
+        active: bool | None = None,
+        protected: bool | None = None,
+        linked: bool | None = None,
+        x_ok: bool | None = None,
+        points: str = "any",
+        sort: str = "score_desc",
+    ) -> Response:
+        """The current member list, with the same filters as the page, as a CSV sheet."""
+        threshold = None
+        if points == "low":
+            config_values = await runtime.repository.get_config()
+            threshold = float(config_values["low_activity_threshold"])
+        page = await runtime.repository.paginated_users(
+            search=search,
+            active=active,
+            protected=protected,
+            linked=linked,
+            x_ok=x_ok,
+            points=points,
+            low_threshold=threshold,
+            sort=sort,
+            page=1,
+            page_size=10000,
+        )
+        buffer = io.StringIO()
+        writer = csv.writer(buffer, lineterminator="\r\n")
+        writer.writerow(
+            [
+                "rank",
+                "discord_username",
+                "discord_id",
+                "x_handle",
+                "points",
+                "protected",
+                "special_role_names",
+                "x_status",
+                "active",
+                "last_signal",
+                "linked_at",
+            ]
+        )
+        for index, item in enumerate(page["items"], start=1):
+            writer.writerow(
+                [
+                    index,
+                    item["discord_username"],
+                    item["discord_user_id"],
+                    item["twitter_handle"],
+                    item["score"],
+                    "YES" if item["special_role"] else "NO",
+                    item["special_role_names"],
+                    item["x_status"] or ("ok" if item["twitter_user_id"] else "not linked"),
+                    "active" if item["active"] else "inactive",
+                    item["last_active_at"],
+                    item["linked_at"],
+                ]
+            )
+        stamp = time.strftime("%Y-%m-%d")
+        return Response(
+            content="\ufeff" + buffer.getvalue(),
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": f'attachment; filename="majors-lair-members-{stamp}.csv"'
+            },
         )
 
     @app.post("/api/users/verify-x")
