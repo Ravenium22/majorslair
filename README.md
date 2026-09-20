@@ -36,13 +36,14 @@ Member commands:
 
 - `/link-twitter @handle`
 - `/unlink-twitter`
-- `/leaderboard`
+- `/leaderboard [period]`
 - `/my-score`
 - `/my-history`
 
 Admin commands:
 
-- `/check-engagement [period]`
+- `/user-history @member [limit]`
+- `/check-engagement [period] [skip_protected]`
 - `/refresh-engagement`
 - `/track-post <url>`
 - `/low-activity-report [threshold]`

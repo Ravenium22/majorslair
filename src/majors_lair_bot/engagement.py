@@ -566,6 +566,72 @@ class EngagementService:
             )
         return actions, scopes
 
+    async def _collect_reply_sweep(
+        self,
+        *,
+        rules: ScoringRules,
+        cycle_id: str,
+        since: datetime,
+        until: datetime,
+        max_pages: int,
+        by_id: dict[str, LinkedUser],
+        by_handle: dict[str, LinkedUser],
+        already_counted_tweet_ids: set[str],
+        summary: ScanSummary,
+    ) -> list[EngagementAction]:
+        """Second reply path: search ``to:@account`` for replies the reply list hid."""
+        actions: list[EngagementAction] = []
+        if max_pages <= 0:
+            return actions
+        for target in (rules.primary_handle, rules.secondary_handle):
+            if not target:
+                continue
+            try:
+                result = await self.twitter.search_replies_to(
+                    target, since=since, until=until, max_pages=max_pages
+                )
+            except TwitterApiError as exc:
+                summary.warnings.append(f"Reply sweep failed for @{target}: {exc}")
+                continue
+            if not result.complete:
+                summary.warnings.append(
+                    f"Reply sweep for @{target} hit the page cap (max_reply_search_pages)"
+                )
+            for raw in result.items:
+                try:
+                    tweet = parse_tweet(raw)
+                except (TypeError, ValueError):
+                    continue
+                if tweet.tweet_id in already_counted_tweet_ids:
+                    continue
+                if not tweet.reply_to_tweet_id or tweet.is_retweet:
+                    continue
+                if not (since <= tweet.created_at <= until):
+                    continue
+                if tweet.author_handle == target:
+                    continue
+                user = self._match_user(tweet.author_id, tweet.author_handle, by_id, by_handle)
+                if user is None:
+                    summary.skipped_unlinked += 1
+                    continue
+                already_counted_tweet_ids.add(tweet.tweet_id)
+                summary.swept_replies += 1
+                actions.append(
+                    self._make_action(
+                        cycle_id=cycle_id,
+                        user=user,
+                        action_type=ActionType.REPLY,
+                        target_handle=target,
+                        source_post_id=tweet.reply_to_tweet_id,
+                        action_tweet_id=tweet.tweet_id,
+                        action_url=tweet.url,
+                        text=tweet.text,
+                        has_media=tweet.has_media,
+                        occurred_at=tweet.created_at,
+                    )
+                )
+        return actions
+
     async def _collect_mentions(
         self,
         *,
@@ -750,6 +816,18 @@ class EngagementService:
             counted_ids = {
                 action.action_tweet_id for action in discovered if action.action_tweet_id
             }
+            swept = await self._collect_reply_sweep(
+                rules=rules,
+                cycle_id=cycle_id,
+                since=since,
+                until=until,
+                max_pages=self._config_int(config, "max_reply_search_pages"),
+                by_id=by_id,
+                by_handle=by_handle,
+                already_counted_tweet_ids=counted_ids,
+                summary=summary,
+            )
+            discovered.extend(swept)
             mentions, mention_scopes = await self._collect_mentions(
                 rules=rules,
                 cycle_id=cycle_id,
@@ -909,8 +987,10 @@ class EngagementService:
         source_credits = max(len(posts), estimate_requests) * credit_per_item
         engagement_credits = engagement_items * credit_per_item
         mentions_credits_max = mention_cap * credit_per_item * 2
+        sweep_cap = self._config_int(config, "max_reply_search_pages") * page_size
+        sweep_credits_max = sweep_cap * credit_per_item * 2
         low = source_credits + engagement_credits
-        high = low + mentions_credits_max
+        high = low + mentions_credits_max + sweep_credits_max
         result = {
             "period": period_label,
             "since": isoformat(since),
@@ -920,6 +1000,7 @@ class EngagementService:
             "source_credits": source_credits,
             "engagement_credits": engagement_credits,
             "mentions_credits_max": mentions_credits_max,
+            "sweep_credits_max": sweep_credits_max,
             "credits_low": low,
             "credits_high": high,
             "usd_low": round(low / 100_000, 2),

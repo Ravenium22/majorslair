@@ -241,3 +241,56 @@ async def test_estimate_scan_sums_post_counters_and_caches(repository: DatabaseR
 
     again = await service.estimate_scan("7d")
     assert again["cached"] is True and twitter.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_reply_sweep_counts_hidden_replies_once(repository: DatabaseRepository) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from majors_lair_bot.models import ActionType, ScanSummary
+    from majors_lair_bot.scoring import DEFAULT_CONFIG, ScoringRules
+    from majors_lair_bot.twitter_client import PageResult
+
+    now = datetime.now(UTC)
+    raw_hidden = {
+        "id": "901",
+        "text": "cokkk",
+        "createdAt": (now - timedelta(days=2)).strftime("%a %b %d %H:%M:%S %z %Y"),
+        "inReplyToId": "500",
+        "author": {"id": "77", "userName": "oluwa"},
+    }
+    raw_seen = {**raw_hidden, "id": "902"}
+    raw_by_target = {**raw_hidden, "id": "903", "author": {"id": "1", "userName": "majorslair"}}
+
+    class SweepTwitter(FakeTwitter):
+        async def search_replies_to(self, handle: str, **_: object) -> PageResult:
+            if handle != "majorslair":
+                return PageResult(items=[], complete=True, pages=1)
+            return PageResult(items=[raw_hidden, raw_seen, raw_by_target], complete=True, pages=1)
+
+    twitter = SweepTwitter({})
+    service = EngagementService(repository, twitter)  # type: ignore[arg-type]
+    await repository.link_user(
+        discord_user_id="7", discord_username="oluwa", twitter_handle="oluwa", twitter_user_id="77"
+    )
+    users = await repository.list_users(active_only=True)
+    by_id, by_handle = service._user_indexes(users)
+    summary = ScanSummary(period_label="7d")
+    counted = {"902"}  # already found by the per-post reply endpoint
+
+    actions = await service._collect_reply_sweep(
+        rules=ScoringRules.from_mapping(DEFAULT_CONFIG),
+        cycle_id="cycle_initial",
+        since=now - timedelta(days=7),
+        until=now,
+        max_pages=5,
+        by_id=by_id,
+        by_handle=by_handle,
+        already_counted_tweet_ids=counted,
+        summary=summary,
+    )
+
+    assert [a.action_tweet_id for a in actions] == ["901"]
+    assert actions[0].action_type is ActionType.REPLY
+    assert actions[0].source_post_id == "500" and actions[0].target_handle == "majorslair"
+    assert summary.swept_replies == 1 and "901" in counted

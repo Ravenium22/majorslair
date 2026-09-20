@@ -1,10 +1,10 @@
 import { useMemo, useState, type ChangeEvent, type FormEvent } from 'react'
-import { BadgeCheck, Download, FileUp, Plus, RefreshCw, Search, Shield, ShieldCheck, ShieldOff, UserRoundCheck, UserRoundX } from 'lucide-react'
+import { BadgeCheck, Download, ExternalLink, FileUp, Pencil, Plus, RefreshCw, Search, Shield, ShieldCheck, ShieldOff, UserRoundCheck, UserRoundX, X } from 'lucide-react'
 import useSWR from 'swr'
 import { api, formatDate, formatScore, mutateApi } from '../api'
 import { Empty, PageHeader, Pagination, Toast } from '../components'
 import { parseCsv, rowsFromSheet, type ImportRow } from '../csv'
-import type { DiscordSyncResponse, ImportResponse, ImportStatus, LinkedUser, Paginated, Session, VerifyResponse } from '../types'
+import type { Action, DiscordSyncResponse, ImportResponse, ImportStatus, LinkedUser, Paginated, Session, VerifyResponse } from '../types'
 
 const STATUS_LABEL: Record<ImportStatus, string> = { linked: 'Linked', relinked: 'Handle updated', unchanged: 'Already linked', registered: 'Registered, no X', skipped: 'Skipped', conflict: 'Conflict', failed: 'Failed' }
 const STATUS_TONE: Record<ImportStatus, string> = { linked: 'complete', relinked: 'complete', unchanged: 'active', registered: 'running', skipped: '', conflict: 'failed', failed: 'failed' }
@@ -50,6 +50,10 @@ export default function MembersPage({ session }: { session: Session }) {
   const [importResult, setImportResult] = useState<ImportResponse>()
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState<DiscordSyncResponse>()
+  const [selected, setSelected] = useState<LinkedUser>()
+  const [editing, setEditing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const { data: history, mutate: mutateHistory } = useSWR<Paginated<Action>>(selected ? `/api/actions?discord_user_id=${selected.discord_user_id}&page_size=100` : null, api)
   const [verifying, setVerifying] = useState(false)
   const [verifyResult, setVerifyResult] = useState<VerifyResponse>()
   const [verifyPlan, setVerifyPlan] = useState<{ linked: number; protectedLinked: number }>()
@@ -155,6 +159,37 @@ export default function MembersPage({ session }: { session: Session }) {
   const withHandles = importRows.filter((row) => row.twitter_handle).length
   const withSpecial = importRows.filter((row) => row.special_role).length
 
+  const openMember = (user: LinkedUser) => { setSelected(user); setEditing(false) }
+  const closeMember = () => { if (saving) return; setSelected(undefined); setEditing(false) }
+
+  const saveEdit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!selected) return
+    const form = new FormData(event.currentTarget)
+    const discord_username = String(form.get('discord_username') ?? '').trim()
+    const twitter_handle = String(form.get('twitter_handle') ?? '').trim().replace(/^@/, '')
+    const special_role = form.get('special_role') === 'on'
+    const special_role_names = String(form.get('special_role_names') ?? '').trim()
+    setSaving(true)
+    try {
+      const body: Record<string, unknown> = {}
+      if (discord_username && discord_username !== selected.discord_username) body.discord_username = discord_username
+      if (special_role !== selected.special_role || special_role_names !== selected.special_role_names) { body.special_role = special_role; body.special_role_names = special_role ? special_role_names : '' }
+      let updated = selected
+      if (Object.keys(body).length) updated = await mutateApi<LinkedUser>(`/api/users/${selected.discord_user_id}`, session.csrf_token, 'PATCH', body)
+      if (twitter_handle && twitter_handle.toLowerCase() !== selected.twitter_handle.toLowerCase()) {
+        await mutateApi('/api/users/link', session.csrf_token, 'POST', { discord_user_id: selected.discord_user_id, discord_username: discord_username || selected.discord_username, twitter_handle })
+        const fresh = await api<Paginated<LinkedUser>>(`/api/users?search=${encodeURIComponent(selected.discord_user_id)}&page_size=1`)
+        updated = fresh.items[0] ?? updated
+      }
+      setSelected(updated)
+      setEditing(false)
+      setNotice({ text: `${updated.discord_username} updated.`, kind: 'success' })
+      await Promise.all([mutate(), mutateHistory()])
+    } catch (error) { setNotice({ text: error instanceof Error ? error.message : 'Update failed', kind: 'error' }) }
+    finally { setSaving(false) }
+  }
+
   return <div className="page">
     <PageHeader eyebrow="Community registry" title="Linked members" copy="Everyone in the community, with or without an X account. Protected members never appear in the low-activity report." actions={<>
       <button className="button" onClick={openVerify} disabled={verifying} title="Check linked X accounts for suspensions, deletions, and renames (about 10 credits each)"><BadgeCheck size={17} className={verifying ? 'spin' : ''} /> {verifying ? 'Checking X…' : 'Verify X accounts'}</button>
@@ -177,14 +212,15 @@ export default function MembersPage({ session }: { session: Session }) {
         <span className="filter-count">{data ? `${data.total.toLocaleString()} member${data.total === 1 ? '' : 's'}` : ''}{hasFilters && <button className="link-button" onClick={clearFilters}>Clear filters</button>}</span>
       </div>
       <div className="table-wrap"><table><thead><tr><th>Discord</th><th>X identity</th><th>Special role</th><th>Score</th><th>Last signal</th><th>Status</th><th aria-label="Actions" /></tr></thead><tbody>
-        {data?.items.map((user) => <tr key={user.discord_user_id}>
+        {data?.items.map((user) => <tr key={user.discord_user_id} className="member-row" onClick={() => openMember(user)}>
           <td><span className="member-cell"><strong>{user.discord_username}</strong><small className="mono">{user.discord_user_id}</small></span></td>
           <td>{user.twitter_user_id ? <span className="protected-cell"><a href={`https://x.com/${user.twitter_handle}`} target="_blank">@{user.twitter_handle}</a>{(user.x_status === 'suspended' || user.x_status === 'unavailable') && <span className="status failed"><i />X {user.x_status}</span>}</span> : <span className="muted">Not linked</span>}</td>
           <td>{user.special_role ? <span className="protected-cell"><span className="status complete"><i />Protected</span>{user.special_role_names && <small>{user.special_role_names}</small>}</span> : <span className="muted">—</span>}</td>
           <td className="score">{formatScore(user.score)}</td>
           <td>{formatDate(user.last_active_at)}</td>
           <td><span className={`status ${user.active ? 'complete' : 'failed'}`}><i />{user.active ? 'Active' : 'Inactive'}</span></td>
-          <td className="row-actions">
+          <td className="row-actions" onClick={(e) => e.stopPropagation()}>
+            <button className="icon-button" title="Open member: history and edit" onClick={() => { openMember(user); setEditing(true) }}><Pencil size={17} /></button>
             <button className="icon-button" title={user.special_role ? 'Remove protection' : 'Protect from low-activity report'} onClick={() => toggleProtected(user)}>{user.special_role ? <ShieldOff size={18} /> : <Shield size={18} />}</button>
             <button className="icon-button" title={user.active ? 'Deactivate' : 'Reactivate'} onClick={() => toggleActive(user)}>{user.active ? <UserRoundX size={18} /> : <UserRoundCheck size={18} />}</button>
           </td>
@@ -193,6 +229,32 @@ export default function MembersPage({ session }: { session: Session }) {
       {!isLoading && !data?.items.length && <Empty title="No matching members" copy="Change the filters, sync from Discord, or import the community sheet." />}
       <Pagination page={page} size={25} total={data?.total ?? 0} onChange={setPage} />
     </section>
+
+    {selected && <div className="modal-backdrop" onMouseDown={closeMember}><div className="modal modal-wide member-drawer" onMouseDown={(e) => e.stopPropagation()}>
+      <button className="icon-button drawer-close" onClick={closeMember} aria-label="Close"><X size={18} /></button>
+      <p className="eyebrow">Member</p>
+      <h2>{selected.discord_username} <small className="mono">{selected.discord_user_id}</small></h2>
+      <div className="member-facts">
+        <span>{selected.twitter_user_id ? <a href={`https://x.com/${selected.twitter_handle}`} target="_blank">@{selected.twitter_handle}</a> : <em className="muted">no X linked</em>}</span>
+        <span className="score">{formatScore(selected.score)} pts this cycle</span>
+        {selected.special_role && <span className="status complete"><i />Protected{selected.special_role_names ? ` · ${selected.special_role_names}` : ''}</span>}
+        {(selected.x_status === 'suspended' || selected.x_status === 'unavailable') && <span className="status failed"><i />X {selected.x_status}</span>}
+        <span className={`status ${selected.active ? 'complete' : 'failed'}`}><i />{selected.active ? 'Active' : 'Inactive'}</span>
+        {selected.handle_history && <span className="muted">previous X: {selected.handle_history.split('|').map((h) => `@${h}`).join(', ')}</span>}
+      </div>
+      {!editing ? <div className="modal-actions left"><button className="button" onClick={() => setEditing(true)}><Pencil size={15} /> Edit member</button></div> : <form className="edit-grid" onSubmit={saveEdit}>
+        <label>Discord handle<input name="discord_username" defaultValue={selected.discord_username} required maxLength={120} /></label>
+        <label>X handle<input name="twitter_handle" defaultValue={selected.twitter_handle} placeholder="handle (verified on save)" /></label>
+        <label className="check-row"><input type="checkbox" name="special_role" defaultChecked={selected.special_role} /> Protected (never in the low-activity report)</label>
+        <label>Special role names<input name="special_role_names" defaultValue={selected.special_role_names} placeholder="Builder, Friend" /></label>
+        <div className="modal-actions"><button type="button" className="button ghost" onClick={() => setEditing(false)} disabled={saving}>Cancel</button><button className="button primary" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button></div>
+      </form>}
+      <h3 className="sub-heading">Engagement this cycle · {history ? `${history.total} action${history.total === 1 ? '' : 's'}` : '…'}</h3>
+      <p className="muted small">Every reply, quote, retweet and mention the scans matched to this member, with the points decision. Zero-point rows show why.</p>
+      {history?.items.length ? <div className="table-wrap standings-table"><table><thead><tr><th>Type</th><th>Target</th><th>Content / decision</th><th>Points</th><th>When</th><th /></tr></thead><tbody>
+        {history.items.map((item) => <tr key={item.action_key} className={item.active ? '' : 'muted-row'}><td><span className={`action-chip ${item.action_type}`}>{item.action_type}</span></td><td>@{item.target_handle}</td><td className="decision"><strong>{item.text || 'Native retweet'}</strong><small>{item.reason}{!item.active ? ' · no longer public' : ''}</small></td><td className={`score ${item.points > 0 ? 'gain' : ''}`}>{formatScore(item.points)}</td><td>{formatDate(item.occurred_at)}</td><td>{item.action_url && <a className="icon-button" href={item.action_url} target="_blank" title="Open on X"><ExternalLink size={15} /></a>}</td></tr>)}
+      </tbody></table></div> : history ? <p className="muted small">No matched actions in this cycle. If they did interact, check the X handle above is the account they used, then run a scan that covers the date.</p> : null}
+    </div></div>}
 
     {showLink && <div className="modal-backdrop" onMouseDown={() => setShowLink(false)}><form className="modal" onSubmit={link} onMouseDown={(e) => e.stopPropagation()}><div className="modal-icon"><ShieldCheck /></div><p className="eyebrow">Verified identity</p><h2>Link a member</h2><p>Use the Discord username (the handle shown in the profile, not the nickname). The X handle is resolved through twitterapi.io and its stable account ID is stored.</p><label>Discord user ID<input required name="discord_user_id" pattern="\d+" placeholder="123456789012345678" /></label><label>Discord handle<input required name="discord_username" placeholder="luna.luna12" autoCapitalize="none" spellCheck={false} /></label><label>X handle<input required name="twitter_handle" placeholder="@handle" /></label><div className="modal-actions"><button type="button" className="button ghost" onClick={() => setShowLink(false)}>Cancel</button><button className="button primary">Verify & link</button></div></form></div>}
 
@@ -234,6 +296,9 @@ export default function MembersPage({ session }: { session: Session }) {
       <div className="modal-icon"><RefreshCw /></div><p className="eyebrow">Discord sync</p><h2>Server members compared with the registry</h2>
       <p className="import-summary">{syncResult.discord_members} humans in the server · {syncResult.added.length} newly registered · {syncResult.already_registered_active} already present + {syncResult.already_registered_inactive} inactive · {syncResult.bots_skipped} bots skipped · {syncResult.left_server.length} registered members no longer in the server.</p>
       <p className="import-summary">Registry now holds <strong>{syncResult.registry_active} active + {syncResult.registry_inactive} inactive</strong> members.</p>
+      {syncResult.protected_roles_configured.length === 0 && <p className="estimate-warning">No protected role names are configured. Set <code>protected_role_names</code> in Scoring rules (for example: Active Supporter, Builder, Friend, Collaborator, Team) and sync again to protect members by their Discord roles.</p>}
+      {syncResult.protected_by_role.length > 0 && <><h3 className="sub-heading">Newly protected because of their Discord roles</h3><div className="table-wrap import-results"><table><tbody>{syncResult.protected_by_role.map((row) => <tr key={row.discord_user_id}><td><span className="member-cell"><strong>{row.discord_username}</strong><small className="mono">{row.discord_user_id}</small></span></td><td className="muted">{row.roles}</td></tr>)}</tbody></table></div></>}
+      {syncResult.renamed.length > 0 && <><h3 className="sub-heading">Discord handles updated</h3><div className="table-wrap import-results"><table><tbody>{syncResult.renamed.map((row) => <tr key={row.discord_user_id}><td className="muted">{row.old} →</td><td><span className="member-cell"><strong>{row.discord_username}</strong><small className="mono">{row.discord_user_id}</small></span></td></tr>)}</tbody></table></div></>}
       {syncResult.added.length > 0 && <><h3 className="sub-heading">Newly registered (no X yet)</h3><div className="table-wrap import-results"><table><tbody>{syncResult.added.map((row) => <tr key={row.discord_user_id}><td><span className="member-cell"><strong>{row.discord_username}</strong><small className="mono">{row.discord_user_id}</small></span></td></tr>)}</tbody></table></div></>}
       {syncResult.left_server.length > 0 && <><h3 className="sub-heading">In the registry but not in the server</h3><div className="table-wrap import-results"><table><tbody>{syncResult.left_server.map((row) => <tr key={row.discord_user_id}><td><span className="member-cell"><strong>{row.discord_username}</strong><small className="mono">{row.discord_user_id}</small></span></td></tr>)}</tbody></table></div></>}
       <div className="modal-actions"><button className="button primary" onClick={() => setSyncResult(undefined)}>Done</button></div>

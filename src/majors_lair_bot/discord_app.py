@@ -238,19 +238,15 @@ class EngagementCog(commands.Cog):
             ephemeral=True,
         )
 
-    @app_commands.command(name="my-history", description="Show how your latest actions were scored")
-    @app_commands.guild_only()
-    async def my_history(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer(ephemeral=True, thinking=True)
+    async def _history_embed(
+        self, discord_user_id: str, *, title: str, limit: int = 10
+    ) -> discord.Embed | None:
         config = await self.bot.repository.get_config()
         cycle_id = config.get("current_cycle_id", DEFAULT_CONFIG["current_cycle_id"])
-        history = await self.bot.repository.user_history(str(interaction.user.id), cycle_id, 10)
+        history = await self.bot.repository.user_history(discord_user_id, cycle_id, limit)
         if not history:
-            await interaction.followup.send(
-                "No engagement actions are logged for you in this cycle yet.", ephemeral=True
-            )
-            return
-        embed = discord.Embed(title="Your recent engagement scoring", color=discord.Color.blurple())
+            return None
+        embed = discord.Embed(title=title, color=discord.Color.blurple())
         for action in history:
             status = "active" if action.active else "no longer public"
             name = (
@@ -262,6 +258,57 @@ class EngagementCog(commands.Cog):
                 value=f"{link}{action.reason}"[:1024],
                 inline=False,
             )
+        return embed
+
+    @app_commands.command(name="my-history", description="Show how your latest actions were scored")
+    @app_commands.guild_only()
+    async def my_history(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        embed = await self._history_embed(
+            str(interaction.user.id), title="Your recent engagement scoring"
+        )
+        if embed is None:
+            await interaction.followup.send(
+                "No engagement actions are logged for you in this cycle yet.", ephemeral=True
+            )
+            return
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @app_commands.command(
+        name="user-history", description="Admin: see how a member's latest actions were scored"
+    )
+    @app_commands.describe(member="The Discord member to audit", limit="How many actions (max 25)")
+    @app_commands.guild_only()
+    @admin_only()
+    async def user_history(
+        self,
+        interaction: discord.Interaction,
+        member: discord.Member,
+        limit: app_commands.Range[int, 1, 25] = 15,
+    ) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        linked = await self.bot.repository.get_user(str(member.id))
+        if linked is None:
+            await interaction.followup.send(
+                f"{member.mention} is not in the registry yet.", ephemeral=True
+            )
+            return
+        header = (
+            f"{member.mention} · "
+            + (f"`@{linked.twitter_handle}`" if linked.twitter_user_id else "*no X linked*")
+            + f" · **{score_label(linked.score)} pts** this cycle"
+            + (" · protected" if linked.special_role else "")
+            + (f" · X {linked.x_status}" if linked.x_status in {"suspended", "unavailable"} else "")
+        )
+        embed = await self._history_embed(
+            str(member.id), title=f"Engagement history · {linked.discord_username}", limit=limit
+        )
+        if embed is None:
+            await interaction.followup.send(
+                f"{header}\nNo engagement actions logged in this cycle.", ephemeral=True
+            )
+            return
+        embed.description = header
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     async def _run_scan(

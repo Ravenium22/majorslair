@@ -864,12 +864,15 @@ class DatabaseRepository:
         action_type: str = "",
         active: bool | None = None,
         search: str = "",
+        discord_user_id: str = "",
         page: int = 1,
         page_size: int = 50,
     ) -> dict[str, Any]:
         filters = []
         if action_type:
             filters.append(ActionRow.action_type == action_type)
+        if discord_user_id:
+            filters.append(ActionRow.discord_user_id == discord_user_id)
         if active is not None:
             filters.append(ActionRow.active.is_(active))
         if search:
@@ -1001,6 +1004,36 @@ class DatabaseRepository:
             row.completed_at = utc_now()
             row.summary = summary or {}
             row.error = error[:4000]
+
+    async def list_snapshots(self) -> list[dict[str, Any]]:
+        """Every leaderboard reset, newest first, with the full standings it froze."""
+        statement = select(HistoricalSnapshotRow).order_by(
+            HistoricalSnapshotRow.reset_at.desc(), HistoricalSnapshotRow.rank
+        )
+        async with self.sessions() as session:
+            rows = (await session.scalars(statement)).all()
+        grouped: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            entry = grouped.setdefault(
+                row.snapshot_id,
+                {
+                    "snapshot_id": row.snapshot_id,
+                    "cycle_id": row.cycle_id,
+                    "reset_at": isoformat(row.reset_at),
+                    "reset_by_discord_id": row.reset_by_discord_id,
+                    "members": [],
+                },
+            )
+            entry["members"].append(
+                {
+                    "rank": row.rank,
+                    "discord_user_id": row.discord_user_id,
+                    "discord_username": row.discord_username,
+                    "twitter_handle": row.twitter_handle,
+                    "score": float(row.score or 0),
+                }
+            )
+        return list(grouped.values())
 
     async def paginated_scans(self, *, page: int = 1, page_size: int = 25) -> dict[str, Any]:
         count_statement = select(func.count()).select_from(ScanRunRow)

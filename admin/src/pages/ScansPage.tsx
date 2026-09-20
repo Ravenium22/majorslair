@@ -3,7 +3,7 @@ import { ChevronDown, ChevronRight, Download, ScrollText } from 'lucide-react'
 import useSWR from 'swr'
 import { api, formatDate, formatScore } from '../api'
 import { Empty, PageHeader, Pagination, Status } from '../components'
-import type { Paginated, ScanRun } from '../types'
+import type { Paginated, ScanRun, Snapshot } from '../types'
 
 const PAGE_SIZE = 25
 const CREDIT_USD = 1 / 100000
@@ -36,9 +36,23 @@ function duration(run: ScanRun) {
   return seconds < 90 ? `${Math.round(seconds)}s` : `${Math.round(seconds / 60)} min`
 }
 
+function downloadSnapshot(snapshot: Snapshot) {
+  const header = ['rank', 'discord_username', 'discord_id', 'x_handle', 'points']
+  const lines = snapshot.members.map((m) => [m.rank, m.discord_username, m.discord_user_id, m.twitter_handle, m.score].map(csvCell).join(','))
+  const blob = new Blob(['\uFEFF' + [header.join(','), ...lines].join('\r\n')], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = `majors-lair-reset-${snapshot.reset_at.slice(0, 10)}.csv`
+  anchor.click()
+  URL.revokeObjectURL(url)
+}
+
 export default function ScansPage() {
   const [page, setPage] = useState(1)
   const [open, setOpen] = useState<string>()
+  const [openSnapshot, setOpenSnapshot] = useState<string>()
+  const { data: snapshots } = useSWR<Snapshot[]>('/api/snapshots', api)
   const { data, isLoading } = useSWR<Paginated<ScanRun>>(`/api/scan-runs?page=${page}&page_size=${PAGE_SIZE}`, api, { refreshInterval: 15000 })
 
   return <div className="page">
@@ -78,6 +92,7 @@ export default function ScansPage() {
                     <div><dt>Quotes</dt><dd>{String(s.quotes ?? 0)}</dd></div>
                     <div><dt>Retweets</dt><dd>{String(s.retweets ?? 0)}</dd></div>
                     <div><dt>Mentions</dt><dd>{String(s.mentions ?? 0)}</dd></div>
+                    <div><dt>Replies found only by sweep</dt><dd>{String(s.swept_replies ?? 0)}</dd></div>
                     <div><dt>Source posts</dt><dd>{String(s.source_posts ?? 0)}</dd></div>
                     <div><dt>Log entries changed</dt><dd>{String(s.changed_actions ?? 0)}</dd></div>
                     <div><dt>Actions from unlinked people</dt><dd>{String(s.skipped_unlinked ?? 0)}</dd></div>
@@ -109,5 +124,20 @@ export default function ScansPage() {
       <Pagination page={page} size={PAGE_SIZE} total={data?.total ?? 0} onChange={setPage} />
     </section>
     <p className="muted small page-note"><ScrollText size={13} /> Cost is approximate: 15 credits per item or request, 10 per X account check.</p>
+    <section className="panel reset-panel">
+      <div className="panel-head"><div><p className="eyebrow">Leaderboard resets</p><h2>Frozen standings from every reset</h2></div></div>
+      {snapshots?.length ? <div className="table-wrap"><table><thead><tr><th /><th>Reset on</th><th>Cycle closed</th><th>Members</th><th>Top member</th><th>Reset by</th><th /></tr></thead><tbody>
+        {snapshots.map((snap) => { const expanded = openSnapshot === snap.snapshot_id; return <Fragment key={snap.snapshot_id}>
+          <tr className={`scan-row ${expanded ? 'open' : ''}`} onClick={() => setOpenSnapshot(expanded ? undefined : snap.snapshot_id)}>
+            <td className="chev">{expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</td>
+            <td>{formatDate(snap.reset_at)}</td><td className="mono">{snap.cycle_id}</td><td>{snap.members.length}</td>
+            <td>{snap.members[0] ? `${snap.members[0].discord_username} · ${formatScore(snap.members[0].score)} pts` : '—'}</td>
+            <td className="mono">{snap.reset_by_discord_id}</td>
+            <td><button className="button" onClick={(e) => { e.stopPropagation(); downloadSnapshot(snap) }}><Download size={15} /> CSV</button></td>
+          </tr>
+          {expanded && <tr className="scan-detail"><td colSpan={7}><div className="table-wrap standings-table"><table><thead><tr><th>#</th><th>Discord</th><th>X</th><th>Points</th></tr></thead><tbody>{snap.members.map((m) => <tr key={m.discord_user_id}><td className="mono">{m.rank}</td><td><span className="member-cell"><strong>{m.discord_username}</strong><small className="mono">{m.discord_user_id}</small></span></td><td>{m.twitter_handle ? <a href={`https://x.com/${m.twitter_handle}`} target="_blank">@{m.twitter_handle}</a> : <span className="muted">—</span>}</td><td className="score">{formatScore(m.score)}</td></tr>)}</tbody></table></div></td></tr>}
+        </Fragment> })}
+      </tbody></table></div> : <Empty title="No resets yet" copy="When an admin runs /reset-leaderboard or resets from Scoring rules, the standings at that moment are frozen here forever." />}
+    </section>
   </div>
 }

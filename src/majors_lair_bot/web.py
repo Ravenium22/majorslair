@@ -97,6 +97,7 @@ class ActiveToggle(BaseModel):
 
 class UserUpdate(BaseModel):
     active: bool | None = None
+    discord_username: str | None = Field(default=None, min_length=1, max_length=120)
     special_role: bool | None = None
     special_role_names: str | None = Field(default=None, max_length=255)
 
@@ -558,10 +559,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             payload.active is None
             and payload.special_role is None
             and payload.special_role_names is None
+            and payload.discord_username is None
         ):
             raise HTTPException(status_code=422, detail="Nothing to update")
         actor_id = str(admin["discord_user_id"])
         user = None
+        if payload.discord_username is not None:
+            before = await runtime.repository.get_user(discord_user_id)
+            if before is None:
+                raise HTTPException(status_code=404, detail="Member not found")
+            user, _ = await runtime.repository.register_member(
+                discord_user_id=discord_user_id, discord_username=payload.discord_username.strip()
+            )
+            if before.discord_username != user.discord_username:
+                await runtime.repository.append_audit(
+                    event_type="admin_member_renamed",
+                    actor_discord_id=actor_id,
+                    subject_discord_id=discord_user_id,
+                    old_value=before.discord_username,
+                    new_value=user.discord_username,
+                )
         if payload.active is not None:
             try:
                 user = await runtime.repository.set_user_active(discord_user_id, payload.active)
@@ -639,8 +656,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if len(page) < 1000 or not after:
                 break
 
+        # Discord roles that mean "protected" (config: protected_role_names).
+        config_values = await runtime.repository.get_config()
+        wanted_roles = {
+            name.strip().lower()
+            for name in config_values.get("protected_role_names", "").split(",")
+            if name.strip()
+        }
+        role_names: dict[str, str] = {}
+        if wanted_roles:
+            roles_response = await runtime.http.get(
+                f"{DISCORD_API}/guilds/{guild_id}/roles", headers=headers
+            )
+            if roles_response.status_code < 400:
+                for role in roles_response.json():
+                    if isinstance(role, dict) and str(role.get("name", "")).lower() in wanted_roles:
+                        role_names[str(role["id"])] = str(role["name"])
+
         registry = {user.discord_user_id: user for user in await runtime.repository.list_users()}
         added: list[dict[str, str]] = []
+        renamed: list[dict[str, str]] = []
+        protected_by_role: list[dict[str, str]] = []
         bots = 0
         for member in members:
             user = member.get("user") or {}
@@ -650,15 +686,65 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if user.get("bot") or user.get("system"):
                 bots += 1
                 continue
-            if user_id in registry:
-                continue
             # Store the Discord handle (username), not the nickname, so the registry matches
             # what admins see in profiles and what /link-twitter records.
-            handle = user.get("username") or user.get("global_name") or user_id
-            await runtime.repository.register_member(
-                discord_user_id=user_id, discord_username=str(handle)[:120]
+            handle = str(user.get("username") or user.get("global_name") or user_id)[:120]
+            matched_roles = sorted(
+                {role_names[str(r)] for r in member.get("roles", []) if str(r) in role_names}
             )
-            added.append({"discord_user_id": user_id, "discord_username": str(handle)})
+            existing = registry.get(user_id)
+            special_role = True if matched_roles else None
+            special_names = ", ".join(matched_roles) if matched_roles else None
+            if existing is not None:
+                if existing.special_role and special_names and existing.special_role_names:
+                    merged = sorted(
+                        set(existing.special_role_names.split(", ")) | set(matched_roles)
+                    )
+                    special_names = ", ".join(name for name in merged if name)
+                await runtime.repository.register_member(
+                    discord_user_id=user_id,
+                    discord_username=handle,
+                    special_role=special_role,
+                    special_role_names=special_names,
+                )
+                if existing.discord_username != handle:
+                    renamed.append(
+                        {
+                            "discord_user_id": user_id,
+                            "old": existing.discord_username,
+                            "discord_username": handle,
+                        }
+                    )
+                if matched_roles and not existing.special_role:
+                    protected_by_role.append(
+                        {
+                            "discord_user_id": user_id,
+                            "discord_username": handle,
+                            "roles": ", ".join(matched_roles),
+                        }
+                    )
+                continue
+            await runtime.repository.register_member(
+                discord_user_id=user_id,
+                discord_username=handle,
+                special_role=special_role,
+                special_role_names=special_names,
+            )
+            added.append(
+                {
+                    "discord_user_id": user_id,
+                    "discord_username": handle,
+                    "roles": ", ".join(matched_roles),
+                }
+            )
+            if matched_roles:
+                protected_by_role.append(
+                    {
+                        "discord_user_id": user_id,
+                        "discord_username": handle,
+                        "roles": ", ".join(matched_roles),
+                    }
+                )
 
         discord_ids = {
             str((m.get("user") or {}).get("id") or "")
@@ -682,6 +768,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "discord_members": len(members),
                 "bots_skipped": bots,
                 "added": len(added),
+                "renamed": len(renamed),
+                "protected_by_role": len(protected_by_role),
                 "left_server": len(left),
             },
         )
@@ -694,6 +782,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "registry_active": registry_active,
             "registry_inactive": len(final_registry) - registry_active,
             "added": added,
+            "renamed": renamed,
+            "protected_by_role": protected_by_role,
+            "protected_roles_configured": sorted(role_names.values()),
             "left_server": left,
         }
 
@@ -703,6 +794,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         action_type: str = "",
         active: bool | None = None,
         search: str = "",
+        discord_user_id: str = "",
         page: int = 1,
         page_size: int = 50,
     ) -> dict[str, Any]:
@@ -711,6 +803,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             action_type=action_type,
             active=active,
             search=search,
+            discord_user_id=discord_user_id,
             page=page,
             page_size=page_size,
         )
@@ -893,6 +986,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/scans")
     async def scans(_: Admin, limit: int = Query(default=20, ge=1, le=100)) -> list[dict[str, Any]]:
         return await runtime.repository.recent_scans(limit)
+
+    @app.get("/api/snapshots")
+    async def snapshots(_: Admin) -> list[dict[str, Any]]:
+        return await runtime.repository.list_snapshots()
 
     @app.get("/api/scan-runs")
     async def scan_runs(_: Admin, page: int = 1, page_size: int = 25) -> dict[str, Any]:

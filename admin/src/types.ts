@@ -135,6 +135,7 @@ export type ScanEstimate = {
     source_credits: number
     engagement_credits: number
     mentions_credits_max: number
+    sweep_credits_max: number
     credits_low: number
     credits_high: number
     usd_low: number
@@ -162,6 +163,17 @@ export type DiscordSyncResponse = {
   already_registered_inactive: number
   registry_active: number
   registry_inactive: number
-  added: { discord_user_id: string; discord_username: string }[]
+  added: { discord_user_id: string; discord_username: string; roles?: string }[]
+  renamed: { discord_user_id: string; old: string; discord_username: string }[]
+  protected_by_role: { discord_user_id: string; discord_username: string; roles: string }[]
+  protected_roles_configured: string[]
   left_server: { discord_user_id: string; discord_username: string }[]
+}
+
+export type Snapshot = {
+  snapshot_id: string
+  cycle_id: string
+  reset_at: string
+  reset_by_discord_id: string
+  members: { rank: number; discord_user_id: string; discord_username: string; twitter_handle: string; score: number }[]
 }

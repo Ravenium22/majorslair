@@ -18,6 +18,8 @@ DEFAULT_CONFIG: dict[str, str] = {
     "max_source_pages": "50",
     "max_action_pages_per_post": "8",
     "max_mention_pages": "10",
+    "max_reply_search_pages": "25",
+    "protected_role_names": "",
     "low_activity_threshold": "5",
     "skip_protected_members": "false",
     "blacklist": "lfg,gm,gn,alpha,bullish,fire,moon,send it,lets go,let's go",
@@ -59,6 +61,14 @@ CONFIG_DESCRIPTIONS: dict[str, str] = {
     ),
     "max_action_pages_per_post": "Safety cap per replies/quotes/retweeters endpoint.",
     "max_mention_pages": "Safety cap per target account mention scan.",
+    "max_reply_search_pages": (
+        "Pages (20 replies each) of the reply sweep per tracked account. The sweep searches "
+        "to:@account so replies X hides from a post's reply list still count."
+    ),
+    "protected_role_names": (
+        "Comma-separated Discord role names (for example Active Supporter, Builder). "
+        "Sync from Discord marks members holding any of them as protected."
+    ),
     "low_activity_threshold": "Score at or below this appears in the low-activity report.",
     "skip_protected_members": (
         "true = scans neither score nor X-verify special-role members by default; "

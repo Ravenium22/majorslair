@@ -426,6 +426,26 @@ class TwitterApiClient:
             max_pages=max_pages,
         )
 
+    async def search_replies_to(
+        self, handle: str, *, since: datetime, until: datetime, max_pages: int
+    ) -> PageResult:
+        """Every reply addressed to ``handle`` in the window, via search.
+
+        X hides low-quality replies from a post's reply list (and from the reply counter)
+        while the tweets themselves stay public. Search still indexes them, so this is the
+        second path that catches replies the per-post reply endpoint never shows.
+        """
+        query = (
+            f"to:{handle} -from:{handle} "
+            f"since_time:{int(since.timestamp())} until_time:{int(until.timestamp())}"
+        )
+        return await self._paginate(
+            "/twitter/tweet/advanced_search",
+            params={"query": query, "queryType": "Latest"},
+            item_key="tweets",
+            max_pages=max_pages,
+        )
+
     async def get_mentions(
         self, handle: str, *, since: datetime, until: datetime, max_pages: int
     ) -> PageResult:
