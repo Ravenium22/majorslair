@@ -321,6 +321,40 @@ class DatabaseRepository:
             rows = (await session.scalars(statement)).all()
         return [self._linked_user(row) for row in rows]
 
+    async def leaderboard_window(
+        self, *, cycle_id: str, since: datetime, limit: int = 25
+    ) -> list[LinkedUser]:
+        """Rank linked members by points earned on actions that happened since ``since``.
+
+        Uses the stored per-action points, so it reflects exactly what scans have scored;
+        activity that no scan covered yet is not there.
+        """
+        statement = (
+            select(ActionRow.discord_user_id, func.coalesce(func.sum(ActionRow.points), 0))
+            .where(
+                ActionRow.cycle_id == cycle_id,
+                ActionRow.active.is_(True),
+                ActionRow.occurred_at >= since,
+            )
+            .group_by(ActionRow.discord_user_id)
+        )
+        async with self.sessions() as session:
+            sums = {row[0]: float(row[1] or 0) for row in (await session.execute(statement)).all()}
+            rows = (
+                await session.scalars(
+                    select(UserRow).where(
+                        UserRow.active.is_(True), UserRow.twitter_user_id.is_not(None)
+                    )
+                )
+            ).all()
+        ranked = []
+        for row in rows:
+            user = self._linked_user(row)
+            user.score = round(sums.get(row.discord_user_id, 0.0), 2)
+            ranked.append(user)
+        ranked.sort(key=lambda user: (-user.score, user.discord_username.lower()))
+        return ranked[:limit]
+
     async def low_activity(
         self, threshold: float, *, include_protected: bool = False
     ) -> list[LinkedUser]:

@@ -187,3 +187,5 @@ td .muted { color: var(--muted); }
 .filter-count { margin-left: auto; display: inline-flex; align-items: center; gap: 12px; color: var(--muted); font: 10px "Cascadia Mono", Consolas, monospace; letter-spacing: .05em; text-transform: uppercase; white-space: nowrap; }
 .link-button { padding: 0; border: 0; background: none; color: var(--amber); font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
 a.button { text-decoration: none; }
+.panel-tools { display: flex; align-items: center; gap: 14px; }.panel-tools select { width: auto; min-width: 150px; margin: 0; min-height: 34px; padding: 5px 9px; font-size: 12px; }
+.window-note { padding: 0 20px 16px; margin: 0; }

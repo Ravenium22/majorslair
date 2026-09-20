@@ -15,7 +15,7 @@ DEFAULT_CONFIG: dict[str, str] = {
     "secondary_handle": "majorslair",
     "default_check_period": "7d",
     "default_refresh_period": "24h",
-    "max_source_pages": "5",
+    "max_source_pages": "50",
     "max_action_pages_per_post": "8",
     "max_mention_pages": "10",
     "low_activity_threshold": "5",
@@ -52,7 +52,11 @@ CONFIG_DESCRIPTIONS: dict[str, str] = {
     "secondary_handle": "Secondary X account, without @.",
     "default_check_period": "Default period for /check-engagement.",
     "default_refresh_period": "Period used by /refresh-engagement.",
-    "max_source_pages": "Safety cap when fetching target account posts.",
+    "max_source_pages": (
+        "Max pages (20 posts each) fetched per tracked account. Paging stops at the "
+        "window start, so a high cap costs nothing on short windows but is required for "
+        "long ones."
+    ),
     "max_action_pages_per_post": "Safety cap per replies/quotes/retweeters endpoint.",
     "max_mention_pages": "Safety cap per target account mention scan.",
     "low_activity_threshold": "Score at or below this appears in the low-activity report.",

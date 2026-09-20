@@ -25,7 +25,7 @@ from .engagement import EngagementService
 from .scoring import DEFAULT_CONFIG, ScoringRules
 from .settings import Settings
 from .twitter_client import TwitterApiClient, TwitterApiError
-from .utils import parse_bool, parse_period
+from .utils import parse_bool, parse_period, utc_now
 
 LOGGER = logging.getLogger(__name__)
 DISCORD_API = "https://discord.com/api/v10"
@@ -372,6 +372,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         overview_data["recent_scans"] = scans
         overview_data["bot_connected"] = bool(runtime.bot and runtime.bot.is_ready())
         return overview_data
+
+    @app.get("/api/leaderboard")
+    async def leaderboard(
+        _: Admin, window: str = "cycle", limit: int = Query(default=25, ge=1, le=500)
+    ) -> dict[str, Any]:
+        """Top members for the whole cycle or for a trailing window such as 30d or 90d."""
+        if window in {"cycle", "all", ""}:
+            users_list = await runtime.repository.leaderboard(limit)
+            return {"window": "cycle", "items": [asdict(user) for user in users_list]}
+        try:
+            duration, label = parse_period(window)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        config_values = await runtime.repository.get_config()
+        cycle_id = config_values.get("current_cycle_id", DEFAULT_CONFIG["current_cycle_id"])
+        users_list = await runtime.repository.leaderboard_window(
+            cycle_id=cycle_id, since=utc_now() - duration, limit=limit
+        )
+        return {"window": label, "items": [asdict(user) for user in users_list]}
 
     @app.get("/api/users")
     async def users(

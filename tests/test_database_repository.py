@@ -177,3 +177,57 @@ async def test_member_filters_sorting_and_stale_scan_cleanup(
     stale = next(scan for scan in await repository.recent_scans() if scan["scan_id"] == scan_id)
     assert stale["status"] == "failed" and stale["error"] == "restarted"
     assert await repository.fail_stale_scans("restarted") == 0
+
+
+@pytest.mark.asyncio
+async def test_windowed_leaderboard_sums_points_by_action_date(
+    repository: DatabaseRepository,
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from majors_lair_bot.models import ActionType, EngagementAction
+    from majors_lair_bot.utils import isoformat
+
+    await repository.link_user(
+        discord_user_id="1", discord_username="old", twitter_handle="old", twitter_user_id="1"
+    )
+    await repository.link_user(
+        discord_user_id="2", discord_username="new", twitter_handle="new", twitter_user_id="2"
+    )
+    now = datetime.now(UTC)
+
+    def action(key: str, user: str, days_ago: int, points: float) -> EngagementAction:
+        return EngagementAction(
+            action_key=key,
+            cycle_id="cycle_initial",
+            discord_user_id=user,
+            twitter_user_id=user,
+            twitter_handle="h",
+            action_type=ActionType.REPLY,
+            target_handle="m_m3l",
+            source_post_id="p",
+            action_tweet_id=key,
+            action_url="",
+            text="hello there friend",
+            normalized_text="hello there friend",
+            content_hash=key,
+            has_media=False,
+            occurred_at=isoformat(now - timedelta(days=days_ago)),
+            points=points,
+            reason="test",
+        )
+
+    await repository.reconcile_actions(
+        cycle_id="cycle_initial",
+        discovered=[action("a", "1", 80, 10), action("b", "2", 5, 4), action("c", "1", 3, 1)],
+        scopes=[],
+    )
+
+    month = await repository.leaderboard_window(
+        cycle_id="cycle_initial", since=now - timedelta(days=30)
+    )
+    assert [(u.discord_user_id, u.score) for u in month] == [("2", 4.0), ("1", 1.0)]
+    quarter = await repository.leaderboard_window(
+        cycle_id="cycle_initial", since=now - timedelta(days=90)
+    )
+    assert [(u.discord_user_id, u.score) for u in quarter] == [("1", 11.0), ("2", 4.0)]

@@ -13,6 +13,7 @@ from .engagement import EngagementService
 from .scoring import DEFAULT_CONFIG
 from .settings import Settings
 from .twitter_client import TwitterApiClient, TwitterApiError
+from .utils import parse_period, utc_now
 
 LOGGER = logging.getLogger(__name__)
 
@@ -159,12 +160,30 @@ class EngagementCog(commands.Cog):
     @app_commands.command(
         name="leaderboard", description="Show the current public engagement leaderboard"
     )
+    @app_commands.describe(
+        period="Optional trailing window such as 30d, 90d or 180d; default is the whole cycle"
+    )
     @app_commands.guild_only()
-    async def leaderboard(self, interaction: discord.Interaction) -> None:
+    async def leaderboard(
+        self, interaction: discord.Interaction, period: str | None = None
+    ) -> None:
         await interaction.response.defer(thinking=True)
-        users = await self.bot.repository.list_users(active_only=True)
-        linked = [user for user in users if user.twitter_user_id]
-        ranked = sorted(linked, key=lambda user: (-user.score, user.discord_username.lower()))
+        window_label = ""
+        if period:
+            try:
+                duration, window_label = parse_period(period)
+            except ValueError as exc:
+                await interaction.followup.send(str(exc), ephemeral=True)
+                return
+            config = await self.bot.repository.get_config()
+            cycle_id = config.get("current_cycle_id", DEFAULT_CONFIG["current_cycle_id"])
+            ranked = await self.bot.repository.leaderboard_window(
+                cycle_id=cycle_id, since=utc_now() - duration, limit=500
+            )
+        else:
+            users = await self.bot.repository.list_users(active_only=True)
+            linked = [user for user in users if user.twitter_user_id]
+            ranked = sorted(linked, key=lambda user: (-user.score, user.discord_username.lower()))
         if not ranked:
             await interaction.followup.send("No linked members yet.")
             return
@@ -174,7 +193,8 @@ class EngagementCog(commands.Cog):
             for index, user in enumerate(ranked[:25], start=1)
         ]
         embed = discord.Embed(
-            title="Major's Lair · Engagement Leaderboard",
+            title="Major's Lair · Engagement Leaderboard"
+            + (f" · last {window_label}" if window_label else ""),
             description="\n".join(lines),
             color=discord.Color.gold(),
         )

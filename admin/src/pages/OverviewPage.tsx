@@ -3,12 +3,17 @@ import { Activity, ArrowUpRight, Bot, Clock3, Play, Radar, Sparkles, Trophy, Use
 import useSWR from 'swr'
 import { api, formatDate, formatScore, mutateApi } from '../api'
 import { Empty, PageHeader, Status, Toast } from '../components'
-import type { Overview, ScanEstimate, Session } from '../types'
+import type { LinkedUser, Overview, ScanEstimate, Session } from '../types'
+
+const WINDOWS = [['cycle', 'Whole cycle'], ['30d', 'Last 30 days'], ['60d', 'Last 60 days'], ['90d', 'Last 90 days'], ['180d', 'Last 6 months'], ['365d', 'Last 12 months']] as const
 
 const PERIOD_LABEL: Record<string, string> = { '24h': 'last 24 hours', '7d': 'last 7 days', '30d': 'last 30 days', '60d': 'last 60 days', '90d': 'last 90 days', '180d': 'last 6 months', '365d': 'last 12 months' }
 
 export default function OverviewPage({ session }: { session: Session }) {
   const { data, mutate, isLoading } = useSWR<Overview>('/api/overview', api, { refreshInterval: 10000 })
+  const [window, setWindow] = useState<(typeof WINDOWS)[number][0]>('cycle')
+  const { data: windowed } = useSWR<{ window: string; items: LinkedUser[] }>(window === 'cycle' ? null : `/api/leaderboard?window=${window}&limit=8`, api, { refreshInterval: 30000 })
+  const board = window === 'cycle' ? data?.leaderboard ?? [] : windowed?.items ?? []
   const [period, setPeriod] = useState('24h')
   const [notice, setNotice] = useState<{ text: string; kind: 'success' | 'error' | 'loading' }>()
   const [estimate, setEstimate] = useState<ScanEstimate>()
@@ -76,20 +81,21 @@ export default function OverviewPage({ session }: { session: Session }) {
       </section>
       <section className="overview-grid">
         <article className="panel leaderboard-panel">
-          <div className="panel-head"><div><p className="eyebrow">Current standings</p><h2>Top contributors</h2></div><a href="#members">All members <ArrowUpRight size={15} /></a></div>
-          {data?.leaderboard.length ? (
+          <div className="panel-head"><div><p className="eyebrow">Current standings</p><h2>Top contributors</h2></div><div className="panel-tools"><select value={window} onChange={(e) => setWindow(e.target.value as typeof window)} aria-label="Leaderboard window">{WINDOWS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select><a href="#members">All members <ArrowUpRight size={15} /></a></div></div>
+          {board.length ? (
             <div className="leader-list">
-              {data.leaderboard.map((user, index) => (
+              {board.map((user, index) => (
                 <div className="leader-row" key={user.discord_user_id}>
                   <span className={`rank rank-${index + 1}`}>{String(index + 1).padStart(2, '0')}</span>
                   <div className="leader-avatar">{user.discord_username.slice(0, 1).toUpperCase()}</div>
                   <span className="member-cell"><strong>{user.discord_username}</strong><small>@{user.twitter_handle}</small></span>
-                  <div className="score-bar"><i style={{ width: `${Math.max(3, (user.score / Math.max(data.leaderboard[0]?.score || 1, 1)) * 100)}%` }} /></div>
+                  <div className="score-bar"><i style={{ width: `${Math.max(3, (user.score / Math.max(board[0]?.score || 1, 1)) * 100)}%` }} /></div>
                   <strong className="score">{formatScore(user.score)}</strong>
                 </div>
               ))}
             </div>
-          ) : <Empty title="No leaderboard signal yet" copy="Members appear here after linking an X account and completing a scan." />}
+          ) : <Empty title="No leaderboard signal yet" copy={window === 'cycle' ? 'Members appear here after linking an X account and completing a scan.' : 'No scored activity in this window yet. Points only appear for periods a scan has covered.'} />}
+          {window !== 'cycle' && <p className="muted small window-note">Points earned on activity in the {WINDOWS.find(([id]) => id === window)?.[1].toLowerCase()}, taken from scans already run. Run a scan covering that window first if it looks empty.</p>}
         </article>
         <aside className="scan-card">
           <div className="scan-visual"><Sparkles /><div className="orbit one" /><div className="orbit two" /></div>
