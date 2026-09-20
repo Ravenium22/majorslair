@@ -538,7 +538,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "snapshots": snapshots,
         }
 
-    static_dir = Path("static")
+    static_dir = Path("static").resolve()
     if static_dir.exists():
         assets = static_dir / "assets"
         if assets.exists():
