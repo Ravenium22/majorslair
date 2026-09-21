@@ -231,3 +231,55 @@ async def test_windowed_leaderboard_sums_points_by_action_date(
         cycle_id="cycle_initial", since=now - timedelta(days=90)
     )
     assert [(u.discord_user_id, u.score) for u in quarter] == [("1", 11.0), ("2", 4.0)]
+
+
+@pytest.mark.asyncio
+async def test_reconcile_only_deactivates_tweets_x_confirms_gone(
+    repository: DatabaseRepository,
+) -> None:
+    from datetime import UTC, datetime
+
+    from majors_lair_bot.models import ActionType, EngagementAction, ReconcileScope
+    from majors_lair_bot.utils import isoformat
+
+    def action(key: str, tweet_id: str) -> EngagementAction:
+        return EngagementAction(
+            action_key=key,
+            cycle_id="c",
+            discord_user_id="1",
+            twitter_user_id="1",
+            twitter_handle="h",
+            action_type=ActionType.REPLY,
+            target_handle="m_m3l",
+            source_post_id="p",
+            action_tweet_id=tweet_id,
+            action_url="",
+            text="hello there",
+            normalized_text="hello there",
+            content_hash=key,
+            has_media=False,
+            occurred_at=isoformat(datetime.now(UTC)),
+            points=5,
+            reason="r",
+        )
+
+    await repository.reconcile_actions(
+        cycle_id="c", discovered=[action("hidden", "11"), action("deleted", "22")], scopes=[]
+    )
+    scope = ReconcileScope(
+        action_type=ActionType.REPLY, target_handle="m_m3l", source_post_id="p", complete=True
+    )
+
+    async def still_public(ids: list[str]) -> set[str]:
+        assert sorted(ids) == ["11", "22"]
+        return {"11"}  # X still serves the hidden reply; the other one is gone
+
+    changed = await repository.reconcile_actions(
+        cycle_id="c", discovered=[], scopes=[scope], still_public=still_public
+    )
+    assert changed == 1
+    rows = {
+        a.action_key: a.active
+        for a in await repository.list_actions(cycle_id="c", include_inactive=True)
+    }
+    assert rows == {"hidden": True, "deleted": False}

@@ -893,6 +893,14 @@ class EngagementService:
             )
         return actions, scopes
 
+    async def _tweets_still_public(self, tweet_ids: list[str]) -> set[str]:
+        """IDs X still returns; anything missing was deleted, hidden by suspension, or private."""
+        try:
+            return {tweet.tweet_id for tweet in await self.twitter.get_tweets(tweet_ids)}
+        except TwitterApiError as exc:
+            LOGGER.warning("Could not confirm deletions, keeping %s rows: %s", len(tweet_ids), exc)
+            return set(tweet_ids)
+
     async def _collect_reply_sweep(
         self,
         *,
@@ -1270,6 +1278,7 @@ class EngagementService:
                 discovered=discovered,
                 scopes=scopes,
                 ignore_discord_ids=skipped_ids,
+                still_public=self._tweets_still_public,
             )
             await self.rescore_current_cycle(config=config)
             changes = []

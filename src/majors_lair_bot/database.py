@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import secrets
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -542,12 +543,15 @@ class DatabaseRepository:
         discovered: list[EngagementAction],
         scopes: list[ReconcileScope],
         ignore_discord_ids: set[str] | None = None,
+        still_public: Callable[[list[str]], Awaitable[set[str]]] | None = None,
     ) -> int:
         """Merge freshly discovered actions into the cycle log.
 
         Rows belonging to ``ignore_discord_ids`` (members deliberately left out of this
         scan) are never deactivated, so skipping protected members freezes their history
-        instead of erasing it.
+        instead of erasing it. When ``still_public`` is given, a tweet that vanished from
+        a fully scanned scope is only deactivated once X confirms it is gone; hidden
+        replies (found earlier by the sweep or a member scan) therefore keep their points.
         """
         now = utc_now()
         ignored = ignore_discord_ids or set()
@@ -561,15 +565,26 @@ class DatabaseRepository:
                 )
             ).all()
             indexed = {row.action_key: row for row in current_rows}
-            for row in current_rows:
-                if not row.active or row.action_key in discovered_keys:
+            candidates = [
+                row
+                for row in current_rows
+                if row.active
+                and row.action_key not in discovered_keys
+                and row.discord_user_id not in ignored
+                and any(self._scope_matches(row, scope) for scope in complete_scopes)
+            ]
+            confirmed_alive: set[str] = set()
+            if still_public is not None:
+                ids = sorted({row.action_tweet_id for row in candidates if row.action_tweet_id})
+                if ids:
+                    confirmed_alive = await still_public(ids)
+            for row in candidates:
+                if row.action_tweet_id and row.action_tweet_id in confirmed_alive:
+                    row.last_seen_at = now  # hidden by X, but still public: keep it
                     continue
-                if row.discord_user_id in ignored:
-                    continue
-                if any(self._scope_matches(row, scope) for scope in complete_scopes):
-                    row.active = False
-                    row.last_seen_at = now
-                    changed += 1
+                row.active = False
+                row.last_seen_at = now
+                changed += 1
 
             for candidate in discovered:
                 row = indexed.get(candidate.action_key)
