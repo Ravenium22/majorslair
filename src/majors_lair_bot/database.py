@@ -961,6 +961,8 @@ class DatabaseRepository:
         sort: str = "score_desc",
         joined: str = "any",
         grace_days: int = 30,
+        min_score: float | None = None,
+        max_score: float | None = None,
         page: int = 1,
         page_size: int = 50,
     ) -> dict[str, Any]:
@@ -996,6 +998,10 @@ class DatabaseRepository:
             filters.append(UserRow.score <= 0)
         elif points == "low" and low_threshold is not None:
             filters.append(UserRow.score <= low_threshold)
+        if min_score is not None:
+            filters.append(UserRow.score >= min_score)
+        if max_score is not None:
+            filters.append(UserRow.score <= max_score)
         if joined in {"new", "established"} and grace_days > 0:
             cutoff = utc_now() - timedelta(days=grace_days)
             if joined == "new":

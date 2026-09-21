@@ -209,3 +209,5 @@ a.button { text-decoration: none; }
 .adjust-form { display: grid; grid-template-columns: auto 1fr 1fr auto; gap: 10px; align-items: center; margin-top: 12px; }.adjust-form input { margin: 0; }.adjust-form .segmented { margin: 0; }
 .adjust-panel .table-wrap { margin-top: 12px; max-height: 220px; overflow: auto; }
 @media (max-width: 900px) { .adjust-form { grid-template-columns: 1fr; } }
+.role-grid { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 0 14px; }
+@media (max-width: 720px) { .role-grid { grid-template-columns: 1fr 1fr; } }

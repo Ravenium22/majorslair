@@ -1,10 +1,10 @@
 import { useMemo, useState, type ChangeEvent, type FormEvent } from 'react'
-import { ArrowLeftRight, BadgeCheck, Download, ExternalLink, FileUp, Pencil, Plus, RefreshCw, Search, Shield, ShieldCheck, ShieldOff, UserRoundCheck, UserRoundX, X } from 'lucide-react'
+import { ArrowLeftRight, BadgeCheck, Download, ExternalLink, FileUp, Pencil, Plus, RefreshCw, Search, Shield, ShieldCheck, ShieldOff, Tags, UserRoundCheck, UserRoundX, X } from 'lucide-react'
 import useSWR from 'swr'
 import { api, formatDate, formatScore, mutateApi } from '../api'
 import { Empty, PageHeader, Pagination, Toast } from '../components'
 import { parseCsv, rowsFromSheet, type ImportRow } from '../csv'
-import type { Action, Adjustment, DiscordSyncResponse, ImportResponse, ImportStatus, LinkedUser, MemberScanResult, Paginated, Session, VerifyResponse } from '../types'
+import type { Action, Adjustment, DiscordRole, DiscordSyncResponse, ImportResponse, ImportStatus, LinkedUser, MemberScanResult, Paginated, RoleBulkResult, Session, VerifyResponse } from '../types'
 
 const STATUS_LABEL: Record<ImportStatus, string> = { linked: 'Linked', relinked: 'Handle updated', unchanged: 'Already linked', registered: 'Registered, no X', skipped: 'Skipped', conflict: 'Conflict', failed: 'Failed' }
 const STATUS_TONE: Record<ImportStatus, string> = { linked: 'complete', relinked: 'complete', unchanged: 'active', registered: 'running', skipped: '', conflict: 'failed', failed: 'failed' }
@@ -74,6 +74,15 @@ export default function MembersPage({ session }: { session: Session }) {
   const [verifyPlan, setVerifyPlan] = useState<{ linked: number; protectedLinked: number }>()
   const [skipProtected, setSkipProtected] = useState(false)
   const [notice, setNotice] = useState<{ text: string; kind: 'success' | 'error' }>()
+  const [showRoles, setShowRoles] = useState(false)
+  const [roles, setRoles] = useState<{ roles: DiscordRole[]; bot_can_manage_roles: boolean }>()
+  const [roleId, setRoleId] = useState('')
+  const [roleAction, setRoleAction] = useState<'add' | 'remove'>('add')
+  const [roleMin, setRoleMin] = useState('')
+  const [roleMax, setRoleMax] = useState('')
+  const [rolePreview, setRolePreview] = useState<RoleBulkResult>()
+  const [roleResult, setRoleResult] = useState<RoleBulkResult>()
+  const [roleBusy, setRoleBusy] = useState(false)
   const filterQuery = useMemo(() => new URLSearchParams({
     search,
     ...(filter !== 'all' ? { active: String(filter === 'active') } : {}),
@@ -177,6 +186,43 @@ export default function MembersPage({ session }: { session: Session }) {
 
   const openMember = (user: LinkedUser) => { setSelected(user); setEditing(false); setMemberScan(undefined) }
 
+  const roleFilters = () => ({
+    search,
+    active: filter === 'all' ? null : filter === 'active',
+    ...(segment === 'linked' ? { linked: true } : segment === 'unlinked' ? { linked: false } : {}),
+    ...(segment === 'xissues' ? { x_ok: false } : {}),
+    ...(protection !== 'any' ? { protected: protection === 'protected' } : {}),
+    points,
+    joined,
+    min_score: roleMin === '' ? null : Number(roleMin),
+    max_score: roleMax === '' ? null : Number(roleMax),
+  })
+
+  const openRoles = async () => {
+    setShowRoles(true)
+    setRoleResult(undefined)
+    setRolePreview(undefined)
+    try { setRoles(await api('/api/discord/roles')) } catch (error) { setNotice({ text: error instanceof Error ? error.message : 'Could not load roles', kind: 'error' }) }
+  }
+
+  const previewRoles = async () => {
+    setRoleBusy(true)
+    try { setRolePreview(await mutateApi<RoleBulkResult>('/api/users/roles', session.csrf_token, 'POST', { role_id: roleId || '000000', action: roleAction, filters: roleFilters(), dry_run: true })) }
+    catch (error) { setNotice({ text: error instanceof Error ? error.message : 'Preview failed', kind: 'error' }) }
+    finally { setRoleBusy(false) }
+  }
+
+  const applyRoles = async () => {
+    if (!roleId) { setNotice({ text: 'Pick a role first', kind: 'error' }); return }
+    setRoleBusy(true)
+    try {
+      const result = await mutateApi<RoleBulkResult>('/api/users/roles', session.csrf_token, 'POST', { role_id: roleId, action: roleAction, filters: roleFilters(), dry_run: false })
+      setRoleResult(result)
+      setNotice({ text: `${roleAction === 'add' ? 'Gave' : 'Removed'} the role for ${result.changed?.length ?? 0} of ${result.matched} members${result.failed?.length ? `, ${result.failed.length} failed` : ''}.`, kind: result.failed?.length ? 'error' : 'success' })
+    } catch (error) { setNotice({ text: error instanceof Error ? error.message : 'Role update failed', kind: 'error' }) }
+    finally { setRoleBusy(false) }
+  }
+
   const submitAdjust = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!selected) return
@@ -243,6 +289,7 @@ export default function MembersPage({ session }: { session: Session }) {
     <PageHeader eyebrow="Community registry" title="Linked members" copy="Everyone in the community, with or without an X account. Protected members never appear in the low-activity report." actions={<>
       <button className="button" onClick={openVerify} disabled={verifying} title="Check linked X accounts for suspensions, deletions, and renames (about 10 credits each)"><BadgeCheck size={17} className={verifying ? 'spin' : ''} /> {verifying ? 'Checking X…' : 'Verify X accounts'}</button>
       <button className="button" onClick={runSync} disabled={syncing} title="Register every human member of the Discord server who is missing here"><RefreshCw size={17} className={syncing ? 'spin' : ''} /> {syncing ? 'Syncing…' : 'Sync from Discord'}</button>
+      <button className="button" onClick={openRoles}><Tags size={17} /> Give role</button>
       <button className="button" onClick={() => setShowImport(true)}><FileUp size={17} /> Import CSV</button>
       <a className="button" href={`/api/users/export?${filterQuery}`} title="Download the list exactly as filtered below"><Download size={17} /> Export CSV</a>
       <button className="button primary" onClick={() => setShowLink(true)}><Plus size={17} /> Link member</button>
@@ -322,6 +369,22 @@ export default function MembersPage({ session }: { session: Session }) {
       {history?.items.length ? <div className="table-wrap standings-table"><table><thead><tr><th>Type</th><th>Target</th><th>Content / decision</th><th>Points</th><th>When</th><th /></tr></thead><tbody>
         {history.items.map((item) => <tr key={item.action_key} className={item.active ? '' : 'muted-row'}><td><span className={`action-chip ${item.action_type}`}>{item.action_type}</span></td><td>@{item.target_handle}</td><td className="decision"><strong>{item.text || 'Native retweet'}</strong><small>{item.reason}{!item.active ? ' · no longer public' : ''}</small></td><td className={`score ${item.points > 0 ? 'gain' : ''}`}>{formatScore(item.points)}</td><td>{formatDate(item.occurred_at)}</td><td>{item.action_url && <a className="icon-button" href={item.action_url} target="_blank" title="Open on X"><ExternalLink size={15} /></a>}</td></tr>)}
       </tbody></table></div> : history ? <p className="muted small">No matched actions in this cycle. If they did interact, check the X handle above is the account they used, then run a scan that covers the date.</p> : null}
+    </div></div>}
+
+    {showRoles && <div className="modal-backdrop" onMouseDown={() => { if (!roleBusy) setShowRoles(false) }}><div className="modal modal-wide" onMouseDown={(e) => e.stopPropagation()}>
+      <div className="modal-icon"><Tags /></div><p className="eyebrow">Discord roles</p><h2>Give or remove a role in bulk</h2>
+      <p>Applies to the members matching the <strong>filters currently set on this page</strong> (search, X state, protection, points, join date, active), optionally narrowed by a points range below. Preview first, then apply. Every run is logged in the Audit trail.</p>
+      {roles && !roles.bot_can_manage_roles && <p className="estimate-warning">The bot has no <strong>Manage Roles</strong> permission in Discord. Server Settings → Roles → the bot's role → enable Manage Roles, and drag the bot's role above the roles you want it to give.</p>}
+      <div className="role-grid">
+        <label>Role<select value={roleId} onChange={(e) => setRoleId(e.target.value)} disabled={roleBusy}><option value="">Pick a role…</option>{roles?.roles.map((r) => <option key={r.id} value={r.id} disabled={!r.assignable}>{r.name}{r.assignable ? '' : r.managed ? ' (managed by an integration)' : ' (above the bot, cannot assign)'}</option>)}</select></label>
+        <label>Action<select value={roleAction} onChange={(e) => setRoleAction(e.target.value as 'add' | 'remove')} disabled={roleBusy}><option value="add">Give the role</option><option value="remove">Remove the role</option></select></label>
+        <label>Min points<input type="number" step="1" value={roleMin} onChange={(e) => setRoleMin(e.target.value)} placeholder="any" disabled={roleBusy} /></label>
+        <label>Max points<input type="number" step="1" value={roleMax} onChange={(e) => setRoleMax(e.target.value)} placeholder="any" disabled={roleBusy} /></label>
+      </div>
+      <p className="muted small">Current page filters: {[segment !== 'everyone' ? SEGMENTS.find((s) => s.id === segment)?.label : null, protection !== 'any' ? PROTECTION.find((s) => s.id === protection)?.label : null, points !== 'any' ? POINTS.find((s) => s.id === points)?.label : null, joined !== 'any' ? JOINED.find((s) => s.id === joined)?.label : null, filter, search ? `search "${search}"` : null].filter(Boolean).join(' · ') || 'none'}</p>
+      {rolePreview && !roleResult && <><p className="import-summary"><strong>{rolePreview.matched}</strong> members match. {rolePreview.matched > 500 ? 'Showing the first 500.' : ''}</p><div className="table-wrap import-results"><table><tbody>{rolePreview.members?.map((m) => <tr key={m.discord_user_id}><td><span className="member-cell"><strong>{m.discord_username}</strong><small className="mono">{m.discord_user_id}</small></span></td><td className="score">{formatScore(m.score)}</td><td>{m.special_role ? <span className="status complete"><i />Protected</span> : ''}</td></tr>)}</tbody></table></div></>}
+      {roleResult && <><p className="import-summary">{roleAction === 'add' ? 'Gave' : 'Removed'} the role for <strong>{roleResult.changed?.length ?? 0}</strong> of {roleResult.matched} members{roleResult.failed?.length ? ` · ${roleResult.failed.length} failed` : ''}.</p>{roleResult.failed && roleResult.failed.length > 0 && <div className="table-wrap import-results"><table><tbody>{roleResult.failed.map((f) => <tr key={f.discord_user_id}><td><span className="member-cell"><strong>{f.discord_username}</strong><small className="mono">{f.discord_user_id}</small></span></td><td className="muted">{f.error}</td></tr>)}</tbody></table></div>}</>}
+      <div className="modal-actions"><button type="button" className="button ghost" onClick={() => setShowRoles(false)} disabled={roleBusy}>{roleResult ? 'Done' : 'Cancel'}</button>{!roleResult && <button type="button" className="button" onClick={previewRoles} disabled={roleBusy}>{roleBusy ? 'Working…' : 'Preview who matches'}</button>}{!roleResult && <button type="button" className="button primary" onClick={applyRoles} disabled={roleBusy || !roleId || !rolePreview}>{roleBusy ? 'Working…' : roleAction === 'add' ? `Give role to ${rolePreview?.matched ?? '…'} members` : `Remove role from ${rolePreview?.matched ?? '…'} members`}</button>}</div>
     </div></div>}
 
     {showLink && <div className="modal-backdrop" onMouseDown={() => setShowLink(false)}><form className="modal" onSubmit={link} onMouseDown={(e) => e.stopPropagation()}><div className="modal-icon"><ShieldCheck /></div><p className="eyebrow">Verified identity</p><h2>Link a member</h2><p>Use the Discord username (the handle shown in the profile, not the nickname). The X handle is resolved through twitterapi.io and its stable account ID is stored.</p><label>Discord user ID<input required name="discord_user_id" pattern="\d+" placeholder="123456789012345678" /></label><label>Discord handle<input required name="discord_username" placeholder="luna.luna12" autoCapitalize="none" spellCheck={false} /></label><label>X handle<input required name="twitter_handle" placeholder="@handle" /></label><div className="modal-actions"><button type="button" className="button ghost" onClick={() => setShowLink(false)}>Cancel</button><button className="button primary">Verify & link</button></div></form></div>}

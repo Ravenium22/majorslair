@@ -129,6 +129,25 @@ class VerifyRequest(BaseModel):
     skip_protected: bool = False
 
 
+class MemberFilters(BaseModel):
+    search: str = ""
+    active: bool | None = True
+    protected: bool | None = None
+    linked: bool | None = None
+    x_ok: bool | None = None
+    points: str = "any"
+    joined: str = "any"
+    min_score: float | None = None
+    max_score: float | None = None
+
+
+class RoleBulkRequest(BaseModel):
+    role_id: str = Field(min_length=5, max_length=32, pattern=r"^\d+$")
+    action: str = Field(default="add", pattern=r"^(add|remove)$")
+    filters: MemberFilters = Field(default_factory=MemberFilters)
+    dry_run: bool = False
+
+
 class AdjustRequest(BaseModel):
     points: float = Field(gt=-100000, lt=100000)
     reason: str = Field(default="", max_length=300)
@@ -426,6 +445,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         points: str = "any",
         sort: str = "score_desc",
         joined: str = "any",
+        min_score: float | None = None,
+        max_score: float | None = None,
         page: int = 1,
         page_size: int = 50,
     ) -> dict[str, Any]:
@@ -444,9 +465,150 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             sort=sort,
             joined=joined,
             grace_days=grace,
+            min_score=min_score,
+            max_score=max_score,
             page=page,
             page_size=page_size,
         )
+
+    async def _members_matching(filters: MemberFilters) -> list[dict[str, Any]]:
+        config_values = await runtime.repository.get_config()
+        threshold = (
+            float(config_values["low_activity_threshold"]) if filters.points == "low" else None
+        )
+        grace = int(config_values.get("newcomer_grace_days", DEFAULT_CONFIG["newcomer_grace_days"]))
+        page = await runtime.repository.paginated_users(
+            search=filters.search,
+            active=filters.active,
+            protected=filters.protected,
+            linked=filters.linked,
+            x_ok=filters.x_ok,
+            points=filters.points,
+            low_threshold=threshold,
+            joined=filters.joined,
+            grace_days=grace,
+            min_score=filters.min_score,
+            max_score=filters.max_score,
+            page=1,
+            page_size=10000,
+        )
+        return page["items"]
+
+    @app.get("/api/discord/roles")
+    async def discord_roles(_: Admin) -> dict[str, Any]:
+        """Assignable roles of the server, plus whether the bot can manage them."""
+        headers = {"Authorization": f"Bot {runtime.settings.discord_token}"}
+        guild_id = runtime.settings.discord_guild_id
+        roles_response = await runtime.http.get(
+            f"{DISCORD_API}/guilds/{guild_id}/roles", headers=headers
+        )
+        if roles_response.status_code >= 400:
+            raise HTTPException(status_code=502, detail="Could not read the server's roles")
+        me = await runtime.http.get(f"{DISCORD_API}/users/@me", headers=headers)
+        bot_id = str(me.json().get("id", "")) if me.status_code < 400 else ""
+        bot_member = await runtime.http.get(
+            f"{DISCORD_API}/guilds/{guild_id}/members/{bot_id}", headers=headers
+        )
+        bot_role_ids = (
+            {str(r) for r in bot_member.json().get("roles", [])}
+            if bot_member.status_code < 400
+            else set()
+        )
+        roles = [r for r in roles_response.json() if isinstance(r, dict)]
+        bot_top = max(
+            (int(r.get("position", 0)) for r in roles if str(r["id"]) in bot_role_ids), default=0
+        )
+        manage_roles = any(
+            (int(r.get("permissions", 0)) & 0x10000000) or (int(r.get("permissions", 0)) & 0x8)
+            for r in roles
+            if str(r["id"]) in bot_role_ids
+        )
+        output = [
+            {
+                "id": str(r["id"]),
+                "name": r.get("name", ""),
+                "color": r.get("color", 0),
+                "position": int(r.get("position", 0)),
+                "managed": bool(r.get("managed")),
+                "assignable": manage_roles
+                and not r.get("managed")
+                and int(r.get("position", 0)) < bot_top
+                and str(r["id"]) != str(guild_id),
+            }
+            for r in roles
+            if str(r["id"]) != str(guild_id)
+        ]
+        output.sort(key=lambda r: -r["position"])
+        return {"roles": output, "bot_can_manage_roles": manage_roles, "bot_top_position": bot_top}
+
+    @app.post("/api/users/roles")
+    async def bulk_role(payload: RoleBulkRequest, admin: MutatingAdmin) -> dict[str, Any]:
+        """Add or remove one Discord role for every member matching the filters."""
+        members = await _members_matching(payload.filters)
+        if payload.dry_run:
+            return {"matched": len(members), "members": members[:500]}
+        headers = {"Authorization": f"Bot {runtime.settings.discord_token}"}
+        guild_id = runtime.settings.discord_guild_id
+        changed: list[dict[str, str]] = []
+        failed: list[dict[str, str]] = []
+        semaphore = asyncio.Semaphore(4)
+
+        async def apply(member: dict[str, Any]) -> None:
+            url = (
+                f"{DISCORD_API}/guilds/{guild_id}/members/{member['discord_user_id']}"
+                f"/roles/{payload.role_id}"
+            )
+            async with semaphore:
+                for _attempt in range(4):
+                    response = await runtime.http.request(
+                        "PUT" if payload.action == "add" else "DELETE",
+                        url,
+                        headers={**headers, "X-Audit-Log-Reason": "Major's Lair engagement bot"},
+                    )
+                    if response.status_code == 429:
+                        retry = float(response.headers.get("Retry-After", "1") or 1)
+                        await asyncio.sleep(min(10.0, retry))
+                        continue
+                    break
+            entry = {
+                "discord_user_id": member["discord_user_id"],
+                "discord_username": member["discord_username"],
+            }
+            if response.status_code in {204, 200}:
+                changed.append(entry)
+            else:
+                detail = ""
+                try:
+                    detail = str(response.json().get("message", ""))
+                except Exception:  # noqa: BLE001
+                    detail = response.text[:120]
+                if response.status_code == 403:
+                    detail = (
+                        "Missing permission: give the bot the Manage Roles permission and "
+                        "move its role above the target role"
+                    )
+                elif response.status_code == 404:
+                    detail = "Not in the server anymore"
+                failed.append({**entry, "error": f"{response.status_code}: {detail}"})
+
+        await asyncio.gather(*(apply(member) for member in members))
+        await runtime.repository.append_audit(
+            event_type="admin_bulk_role",
+            actor_discord_id=str(admin["discord_user_id"]),
+            details={
+                "role_id": payload.role_id,
+                "action": payload.action,
+                "filters": payload.filters.model_dump(),
+                "matched": len(members),
+                "changed": len(changed),
+                "failed": len(failed),
+            },
+        )
+        return {
+            "matched": len(members),
+            "changed": changed,
+            "failed": failed,
+        }
 
     @app.get("/api/users/export")
     async def export_users(
