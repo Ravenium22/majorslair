@@ -348,6 +348,127 @@ class EngagementService:
             )
         return result
 
+    async def scan_member(
+        self,
+        *,
+        discord_user_id: str,
+        period: str,
+        actor_discord_id: str,
+        max_pages: int = 25,
+    ) -> dict[str, Any]:
+        """Deep-check one member: read their own timeline for the window and score it.
+
+        Reads only this member's tweets (replies included), so it costs a few hundred
+        credits at most. Counts replies to the tracked accounts, quotes of tracked posts and
+        standalone mentions; retweets cannot be attributed from a timeline. Nothing is ever
+        deactivated by this scan, it only adds or refreshes this member's actions.
+        """
+        duration, period_label = parse_period(period)
+        member = await self.repository.get_user(discord_user_id)
+        if member is None:
+            raise ValueError("Member not found")
+        if not member.twitter_user_id or not member.twitter_handle:
+            raise ValueError(f"{member.discord_username} has no X account linked")
+        if not member.active:
+            raise ValueError(f"{member.discord_username} is inactive")
+        if self._scan_lock.locked():
+            raise ValueError("An engagement scan is running; try again when it finishes.")
+        async with self._scan_lock:
+            config = await self.repository.get_config()
+            rules = ScoringRules.from_mapping(config)
+            cycle_id = config.get("current_cycle_id", DEFAULT_CONFIG["current_cycle_id"])
+            until = utc_now()
+            since = until - duration
+            cycle_started_at = config.get("cycle_started_at", "").strip()
+            if cycle_started_at:
+                since = max(since, parse_datetime(cycle_started_at))
+            targets = {rules.primary_handle, rules.secondary_handle} - {""}
+            tracked = {
+                post["tweet_id"]: post["source_handle"]
+                for post in await self.repository.list_tracked_posts(active_only=False)
+            }
+            self.twitter.reset_usage()
+            tweets, complete = await self.twitter.get_user_timeline_with_replies(
+                member.twitter_handle, since=since, until=until, max_pages=max_pages
+            )
+            actions: list[EngagementAction] = []
+            seen: set[str] = set()
+            for tweet in tweets:
+                if tweet.tweet_id in seen or tweet.is_retweet:
+                    continue
+                seen.add(tweet.tweet_id)
+                if tweet.reply_to_tweet_id and tweet.reply_to_handle in targets:
+                    action_type, target, source = (
+                        ActionType.REPLY,
+                        tweet.reply_to_handle,
+                        tweet.reply_to_tweet_id,
+                    )
+                elif tweet.quoted_tweet_id and tweet.quoted_tweet_id in tracked:
+                    action_type, target, source = (
+                        ActionType.QUOTE,
+                        tracked[tweet.quoted_tweet_id],
+                        tweet.quoted_tweet_id,
+                    )
+                elif not tweet.reply_to_tweet_id:
+                    lowered = tweet.text.lower()
+                    mentioned = next((t for t in targets if f"@{t}" in lowered), "")
+                    if not mentioned:
+                        continue
+                    action_type, target, source = ActionType.MENTION, mentioned, ""
+                else:
+                    continue
+                actions.append(
+                    self._make_action(
+                        cycle_id=cycle_id,
+                        user=member,
+                        action_type=action_type,
+                        target_handle=target,
+                        source_post_id=source,
+                        action_tweet_id=tweet.tweet_id,
+                        action_url=tweet.url,
+                        text=tweet.text,
+                        has_media=tweet.has_media,
+                        occurred_at=tweet.created_at,
+                    )
+                )
+            existing_keys = {
+                a.action_key
+                for a in await self.repository.list_actions(
+                    cycle_id=cycle_id, include_inactive=True
+                )
+                if a.discord_user_id == discord_user_id
+            }
+            new_actions = [a for a in actions if a.action_key not in existing_keys]
+            await self.repository.reconcile_actions(
+                cycle_id=cycle_id, discovered=actions, scopes=[]
+            )
+            await self.rescore_current_cycle(config=config)
+            after = await self.repository.get_user(discord_user_id)
+            outcome = {
+                "discord_user_id": discord_user_id,
+                "discord_username": member.discord_username,
+                "twitter_handle": member.twitter_handle,
+                "period": period_label,
+                "tweets_read": len(tweets),
+                "complete": complete,
+                "matched": len(actions),
+                "new_actions": len(new_actions),
+                "replies": sum(a.action_type is ActionType.REPLY for a in actions),
+                "quotes": sum(a.action_type is ActionType.QUOTE for a in actions),
+                "mentions": sum(a.action_type is ActionType.MENTION for a in actions),
+                "points_before": member.score,
+                "points_after": after.score if after else member.score,
+                "api_requests": self.twitter.request_count,
+                "items_returned": self.twitter.items_returned,
+            }
+            await self.repository.append_audit(
+                event_type="member_scan",
+                actor_discord_id=actor_discord_id,
+                subject_discord_id=discord_user_id,
+                details=outcome,
+            )
+            return outcome
+
     async def verify_linked_accounts(
         self,
         *,

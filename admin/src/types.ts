@@ -182,6 +182,24 @@ export type Snapshot = {
   members: { rank: number; discord_user_id: string; discord_username: string; twitter_handle: string; score: number }[]
 }
 
+export type MemberScanResult = {
+  discord_user_id: string
+  discord_username: string
+  twitter_handle: string
+  period: string
+  tweets_read: number
+  complete: boolean
+  matched: number
+  new_actions: number
+  replies: number
+  quotes: number
+  mentions: number
+  points_before: number
+  points_after: number
+  api_requests: number
+  items_returned: number
+}
+
 export type Diagnosis = {
   tweet_id: string
   findings: string[]

@@ -124,6 +124,10 @@ class VerifyRequest(BaseModel):
     skip_protected: bool = False
 
 
+class MemberScanRequest(BaseModel):
+    period: str = Field(default="30d", min_length=2, max_length=10)
+
+
 class DiagnoseRequest(BaseModel):
     url: str = Field(min_length=5, max_length=300)
 
@@ -620,6 +624,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         assert user is not None
         return asdict(user)
+
+    @app.post("/api/users/{discord_user_id}/scan")
+    async def scan_member(
+        discord_user_id: str, payload: MemberScanRequest, admin: MutatingAdmin
+    ) -> dict[str, Any]:
+        """Deep-check a single member's own timeline for the period and score it."""
+        try:
+            return await runtime.service.scan_member(
+                discord_user_id=discord_user_id,
+                period=payload.period,
+                actor_discord_id=str(admin["discord_user_id"]),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except TwitterApiError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     @app.post("/api/users/sync-discord")
     async def sync_discord_members(admin: MutatingAdmin) -> dict[str, Any]:

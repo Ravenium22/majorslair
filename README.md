@@ -43,6 +43,7 @@ Member commands:
 Admin commands:
 
 - `/user-history @member [limit]`
+- `/scan-member @member [period]`
 - `/check-engagement [period] [skip_protected]`
 - `/refresh-engagement`
 - `/track-post <url>`

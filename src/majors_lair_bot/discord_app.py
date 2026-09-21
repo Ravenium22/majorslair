@@ -411,6 +411,35 @@ class EngagementCog(commands.Cog):
         )
 
     @app_commands.command(
+        name="scan-member", description="Admin: deep-check one member's own timeline and score it"
+    )
+    @app_commands.describe(member="The member to scan", period="Examples: 7d, 30d, 90d")
+    @app_commands.guild_only()
+    @admin_only()
+    async def scan_member(
+        self, interaction: discord.Interaction, member: discord.Member, period: str = "30d"
+    ) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            outcome = await self.bot.service.scan_member(
+                discord_user_id=str(member.id),
+                period=period,
+                actor_discord_id=str(interaction.user.id),
+            )
+        except (ValueError, TwitterApiError) as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
+            return
+        await interaction.followup.send(
+            f"Scanned {member.mention} (`@{outcome['twitter_handle']}`) over "
+            f"**{outcome['period']}**: read {outcome['tweets_read']} tweets, matched "
+            f"**{outcome['matched']}** ({outcome['replies']} replies, {outcome['quotes']} quotes, "
+            f"{outcome['mentions']} mentions), {outcome['new_actions']} new. Points "
+            f"**{score_label(outcome['points_before'])} → {score_label(outcome['points_after'])}**."
+            + ("" if outcome["complete"] else " Timeline page cap reached; older tweets skipped."),
+            ephemeral=True,
+        )
+
+    @app_commands.command(
         name="check-engagement", description="Scan and score a chosen recent period"
     )
     @app_commands.describe(

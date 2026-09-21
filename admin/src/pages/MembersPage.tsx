@@ -4,7 +4,7 @@ import useSWR from 'swr'
 import { api, formatDate, formatScore, mutateApi } from '../api'
 import { Empty, PageHeader, Pagination, Toast } from '../components'
 import { parseCsv, rowsFromSheet, type ImportRow } from '../csv'
-import type { Action, DiscordSyncResponse, ImportResponse, ImportStatus, LinkedUser, Paginated, Session, VerifyResponse } from '../types'
+import type { Action, DiscordSyncResponse, ImportResponse, ImportStatus, LinkedUser, MemberScanResult, Paginated, Session, VerifyResponse } from '../types'
 
 const STATUS_LABEL: Record<ImportStatus, string> = { linked: 'Linked', relinked: 'Handle updated', unchanged: 'Already linked', registered: 'Registered, no X', skipped: 'Skipped', conflict: 'Conflict', failed: 'Failed' }
 const STATUS_TONE: Record<ImportStatus, string> = { linked: 'complete', relinked: 'complete', unchanged: 'active', registered: 'running', skipped: '', conflict: 'failed', failed: 'failed' }
@@ -51,6 +51,9 @@ export default function MembersPage({ session }: { session: Session }) {
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState<DiscordSyncResponse>()
   const [selected, setSelected] = useState<LinkedUser>()
+  const [memberPeriod, setMemberPeriod] = useState('30d')
+  const [memberScanning, setMemberScanning] = useState(false)
+  const [memberScan, setMemberScan] = useState<MemberScanResult>()
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const { data: history, mutate: mutateHistory } = useSWR<Paginated<Action>>(selected ? `/api/actions?discord_user_id=${selected.discord_user_id}&page_size=100` : null, api)
@@ -159,7 +162,20 @@ export default function MembersPage({ session }: { session: Session }) {
   const withHandles = importRows.filter((row) => row.twitter_handle).length
   const withSpecial = importRows.filter((row) => row.special_role).length
 
-  const openMember = (user: LinkedUser) => { setSelected(user); setEditing(false) }
+  const openMember = (user: LinkedUser) => { setSelected(user); setEditing(false); setMemberScan(undefined) }
+
+  const runMemberScan = async () => {
+    if (!selected) return
+    setMemberScanning(true)
+    try {
+      const result = await mutateApi<MemberScanResult>(`/api/users/${selected.discord_user_id}/scan`, session.csrf_token, 'POST', { period: memberPeriod })
+      setMemberScan(result)
+      setSelected({ ...selected, score: result.points_after })
+      setNotice({ text: `${result.discord_username}: ${result.matched} actions matched, ${result.new_actions} new, ${formatScore(result.points_before)} → ${formatScore(result.points_after)} pts.`, kind: 'success' })
+      await Promise.all([mutate(), mutateHistory()])
+    } catch (error) { setNotice({ text: error instanceof Error ? error.message : 'Member scan failed', kind: 'error' }) }
+    finally { setMemberScanning(false) }
+  }
   const closeMember = () => { if (saving) return; setSelected(undefined); setEditing(false) }
 
   const saveEdit = async (event: FormEvent<HTMLFormElement>) => {
@@ -249,6 +265,11 @@ export default function MembersPage({ session }: { session: Session }) {
         <label>Special role names<input name="special_role_names" defaultValue={selected.special_role_names} placeholder="Builder, Friend" /></label>
         <div className="modal-actions"><button type="button" className="button ghost" onClick={() => setEditing(false)} disabled={saving}>Cancel</button><button className="button primary" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button></div>
       </form>}
+      {selected.twitter_user_id && <div className="member-scan">
+        <div><h3 className="sub-heading">Scan this member only</h3><p className="muted small">Reads their own timeline (replies included) for the period and scores it. A few hundred credits at most. Catches replies X hides everywhere else.</p></div>
+        <div className="member-scan-controls"><select value={memberPeriod} onChange={(e) => setMemberPeriod(e.target.value)} disabled={memberScanning}><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option><option value="60d">Last 60 days</option><option value="90d">Last 90 days</option><option value="180d">Last 6 months</option><option value="365d">Last 12 months</option></select><button className="button primary" onClick={runMemberScan} disabled={memberScanning}>{memberScanning ? 'Scanning…' : 'Scan this member'}</button></div>
+        {memberScan && <p className="import-summary">Read {memberScan.tweets_read} tweets · matched {memberScan.matched} ({memberScan.replies} replies, {memberScan.quotes} quotes, {memberScan.mentions} mentions) · {memberScan.new_actions} new · points {formatScore(memberScan.points_before)} → <strong>{formatScore(memberScan.points_after)}</strong>{memberScan.complete ? '' : ' · timeline page cap reached, older tweets skipped'} · ≈ {(Math.max(memberScan.items_returned, memberScan.api_requests) * 15).toLocaleString()} credits</p>}
+      </div>}
       <h3 className="sub-heading">Engagement this cycle · {history ? `${history.total} action${history.total === 1 ? '' : 's'}` : '…'}</h3>
       <p className="muted small">Every reply, quote, retweet and mention the scans matched to this member, with the points decision. Zero-point rows show why.</p>
       {history?.items.length ? <div className="table-wrap standings-table"><table><thead><tr><th>Type</th><th>Target</th><th>Content / decision</th><th>Points</th><th>When</th><th /></tr></thead><tbody>
