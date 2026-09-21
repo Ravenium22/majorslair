@@ -1,12 +1,11 @@
 import { Fragment, useState } from 'react'
 import { ChevronDown, ChevronRight, Download, ScrollText } from 'lucide-react'
 import useSWR from 'swr'
-import { api, formatDate, formatScore } from '../api'
+import { api, formatCount, formatDate, formatScore, formatUsd } from '../api'
 import { Empty, Loading, PageHeader, Pagination, Status } from '../components'
 import type { Paginated, ScanRun, Snapshot } from '../types'
 
 const PAGE_SIZE = 25
-const CREDIT_USD = 1 / 100000
 
 function credits(summary: ScanRun['summary']) {
   const items = Number(summary.tweets_returned ?? 0)
@@ -80,7 +79,7 @@ export default function ScansPage() {
               <td>{String(s.discovered ?? '—')}</td>
               <td>{changes.length ? `${changes.length} members` : run.status === 'complete' ? '0' : '—'}</td>
               <td>{unavailable.length ? <span className="status failed"><i />{unavailable.length}</span> : run.status === 'complete' && s.x_checked ? '0' : '—'}</td>
-              <td>{run.status === 'complete' ? `${cost.toLocaleString()} cr · $${(cost * CREDIT_USD).toFixed(2)}` : '—'}</td>
+              <td>{run.status === 'complete' ? `${formatUsd(cost)} · ${formatCount(cost)} cr` : '—'}</td>
             </tr>
             {expanded && <tr className="scan-detail"><td colSpan={11}>
               {run.error && <p className="estimate-warning">Failed: {run.error}</p>}
@@ -90,7 +89,7 @@ export default function ScansPage() {
                 <div><dt>Matched</dt><dd>{String(s.matched ?? 0)}<small>{String(s.replies ?? 0)} replies · {String(s.quotes ?? 0)} quotes · {String(s.mentions ?? 0)} mentions</small></dd></div>
                 <div><dt>New actions</dt><dd>{String(s.new_actions ?? 0)}</dd></div>
                 <div><dt>Points</dt><dd>{formatScore(Number(s.points_before ?? 0))} → {formatScore(Number(s.points_after ?? 0))}</dd></div>
-                <div><dt>Approx. credits</dt><dd>{cost.toLocaleString()} <small>(${(cost * CREDIT_USD).toFixed(3)})</small></dd></div>
+                <div><dt>Approx. cost</dt><dd>{formatUsd(cost)} <small>{formatCount(cost)} credits</small></dd></div>
               </dl></section></div> : <div className="report-grid">
                 <section>
                   <h4>Matched this scan</h4>
@@ -112,7 +111,7 @@ export default function ScansPage() {
                   <dl>
                     <div><dt>API requests</dt><dd>{String(s.api_requests ?? 0)}</dd></div>
                     <div><dt>Items returned</dt><dd>{String(s.tweets_returned ?? 0)}</dd></div>
-                    <div><dt>Approx. credits</dt><dd>{cost.toLocaleString()} <small>(${(cost * CREDIT_USD).toFixed(3)})</small></dd></div>
+                    <div><dt>Approx. cost</dt><dd>{formatUsd(cost)} <small>{formatCount(cost)} credits</small></dd></div>
                     <div><dt>Capped scopes</dt><dd>{String(s.incomplete_scopes ?? 0)}</dd></div>
                     <div><dt>X accounts checked</dt><dd>{String(s.x_checked ?? 0)}</dd></div>
                     <div><dt>Renamed on X</dt><dd>{renamed.length}</dd></div>
@@ -146,7 +145,7 @@ export default function ScansPage() {
           </tr>
           {expanded && <tr className="scan-detail"><td colSpan={7}><div className="table-wrap standings-table"><table><thead><tr><th>#</th><th>Discord</th><th>X</th><th>Points</th></tr></thead><tbody>{snap.members.map((m) => <tr key={m.discord_user_id}><td className="mono">{m.rank}</td><td><span className="member-cell"><strong>{m.discord_username}</strong><small className="mono">{m.discord_user_id}</small></span></td><td>{m.twitter_handle ? <a href={`https://x.com/${m.twitter_handle}`} target="_blank">@{m.twitter_handle}</a> : <span className="muted">—</span>}</td><td className="score">{formatScore(m.score)}</td></tr>)}</tbody></table></div></td></tr>}
         </Fragment> })}
-      </tbody></table></div> : <Empty title="No resets yet" copy="When an admin runs /reset-leaderboard or resets from Scoring rules, the standings at that moment are frozen here forever." />}
+      </tbody></table></div> : <Empty title="No resets yet" copy="When an admin runs /reset-leaderboard, or starts a new cycle from the Overview page, the standings at that moment are frozen here forever." />}
     </section>
   </div>
 }

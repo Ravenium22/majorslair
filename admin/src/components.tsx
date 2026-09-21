@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { AlertCircle, Check, LoaderCircle, X } from 'lucide-react'
+import { formatCount } from './api'
 
 /** Close something with the Escape key while it is open. */
 export function useEscape(active: boolean, onClose: () => void) {
@@ -71,7 +72,7 @@ export function Pagination({ page, size, total, onChange }: { page: number; size
   const pages = Math.max(1, Math.ceil(total / size))
   return (
     <div className="pagination">
-      <span>{total.toLocaleString()} records</span>
+      <span>{formatCount(total)} records</span>
       {pages > 1 && <div><button disabled={page <= 1} onClick={() => onChange(page - 1)}>Previous</button><span>{page} / {pages}</span><button disabled={page >= pages} onClick={() => onChange(page + 1)}>Next</button>{pages > 2 && <label className="page-jump">Go to<input type="number" min={1} max={pages} defaultValue={page} key={page} onKeyDown={(e) => { if (e.key === 'Enter') { const value = Math.min(pages, Math.max(1, Number((e.target as HTMLInputElement).value) || 1)); onChange(value) } }} onBlur={(e) => { const value = Math.min(pages, Math.max(1, Number(e.target.value) || 1)); if (value !== page) onChange(value) }} /></label>}</div>}
     </div>
   )

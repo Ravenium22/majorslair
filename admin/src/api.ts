@@ -45,6 +45,17 @@ export async function mutateApi<T>(
 export const formatScore = (value: number) =>
   new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value)
 
+/** Counts, credits and money all go through here. `toLocaleString()` follows the browser's
+ *  locale while `formatScore` is pinned to en-US, so the two used to disagree on the same
+ *  screen: "4.140 credits" next to "10,068 points". One separator everywhere instead. */
+export const formatCount = (value: number) =>
+  new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(value)
+
+export const CREDIT_USD = 1 / 100000
+
+export const formatUsd = (credits: number) =>
+  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(credits * CREDIT_USD)
+
 export const formatDate = (value?: string) => {
   if (!value) return 'Never'
   const date = new Date(value)

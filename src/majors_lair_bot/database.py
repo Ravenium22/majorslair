@@ -70,21 +70,28 @@ class DatabaseRepository:
             await connection.run_sync(Base.metadata.create_all)
         now = utc_now()
         async with self.sessions.begin() as session:
-            existing = set((await session.scalars(select(ConfigRow.key))).all())
+            rows = {row.key: row for row in (await session.scalars(select(ConfigRow))).all()}
             for key, value in DEFAULT_CONFIG.items():
-                if key in existing:
-                    continue
-                session.add(
-                    ConfigRow(
-                        key=key,
-                        value=value,
-                        description=CONFIG_DESCRIPTIONS.get(
-                            key, "Editable scoring or scan configuration."
-                        ),
-                        updated_at=now,
-                        updated_by="system",
-                    )
+                description = CONFIG_DESCRIPTIONS.get(
+                    key, "Editable scoring or scan configuration."
                 )
+                row = rows.get(key)
+                if row is None:
+                    session.add(
+                        ConfigRow(
+                            key=key,
+                            value=value,
+                            description=description,
+                            updated_at=now,
+                            updated_by="system",
+                        )
+                    )
+                    continue
+                # The description belongs to the code, not to the database: nobody edits it
+                # from the dashboard. Without this, a setting written before its explanation
+                # existed would keep the old placeholder text forever.
+                if row.description != description:
+                    row.description = description
 
     async def get_config(self) -> dict[str, str]:
         async with self.sessions() as session:

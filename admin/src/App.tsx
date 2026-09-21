@@ -17,7 +17,7 @@ import {
   X,
 } from 'lucide-react'
 import useSWR from 'swr'
-import { api, mutateApi, type ApiError } from './api'
+import { api, formatUsd, mutateApi, type ApiError } from './api'
 import type { Overview, Session } from './types'
 import OverviewPage from './pages/OverviewPage'
 import MembersPage from './pages/MembersPage'
@@ -59,32 +59,14 @@ const fetcher = <T,>(url: string) => api<T>(url)
 function Login() {
   return (
     <main className="login-shell">
-      <div className="login-grid" aria-hidden="true" />
       <section className="login-card">
         <div className="brand-mark"><ChartNoAxesColumnIncreasing size={28} /></div>
-        <p className="eyebrow">Major's Lair · Internal</p>
-        <h1>Engagement<br />control center.</h1>
-        <p className="login-copy">
-          Track meaningful X activity, tune scoring, and manage leaderboard cycles from one
-          operational console.
-        </p>
+        <h1>Major's Lair</h1>
+        <p className="login-copy">Engagement scoring for the community. Sign in with the Discord account that holds the admin role.</p>
         <a className="button primary login-button" href="/auth/login">
           <Bot size={18} /> Continue with Discord
         </a>
-        <div className="login-foot">
-          <span><i className="status-dot" /> Admin role required</span>
-          <span>OAuth secured</span>
-        </div>
       </section>
-      <aside className="login-aside">
-        <p>Signal over noise</p>
-        <strong>Reward thoughtful engagement.<br />See every scoring decision.</strong>
-        <div className="signal-bars" aria-hidden="true">
-          {[18, 30, 44, 62, 84, 54, 72, 92].map((height, index) => (
-            <span key={index} style={{ height: `${height}%` }} />
-          ))}
-        </div>
-      </aside>
     </main>
   )
 }
@@ -165,7 +147,7 @@ function Shell({ session, children }: { session: Session; children: ReactNode })
           })}
         </nav>
         <div className="sidebar-system">
-          <div><Coins size={16} /><span>{overview ? `$${(overview.credits_this_month / 100000).toFixed(2)} this month` : 'Spend this month'}<small>{overview ? `${overview.scans_this_month} scan${overview.scans_this_month === 1 ? '' : 's'} on twitterapi.io` : 'twitterapi.io'}</small></span></div>
+          <div><Coins size={16} /><span>{overview ? `${formatUsd(overview.credits_this_month)} this month` : 'Spend this month'}<small>{overview ? `${overview.scans_this_month} scan${overview.scans_this_month === 1 ? '' : 's'} on twitterapi.io` : 'twitterapi.io'}</small></span></div>
           <div><Bot size={16} /><span>Discord bot<small>{overview?.bot_connected ? 'connected' : 'starting up'}</small></span></div>
         </div>
         <div className="profile">
@@ -223,7 +205,8 @@ function useDialogBehaviour() {
             if (!heading.id) heading.id = `dialog-title-${Math.random().toString(36).slice(2, 8)}`
             dialog.setAttribute('aria-labelledby', heading.id)
           }
-          if (!dialog.contains(document.activeElement)) (focusable(dialog)[0] ?? dialog).focus()
+          const preferred = dialog.querySelector<HTMLElement>('[data-dialog-focus]')
+          if (!dialog.contains(document.activeElement)) (preferred ?? focusable(dialog)[0] ?? dialog).focus()
         }
         document.body.style.overflow = 'hidden'
       } else {

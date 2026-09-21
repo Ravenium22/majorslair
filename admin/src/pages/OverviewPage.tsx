@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { Activity, AlertTriangle, ArrowUpRight, Bot, Check, Clock3, LoaderCircle, Play, Radar, RotateCcw, Sparkles, Trophy, Users } from 'lucide-react'
+import { Activity, AlertTriangle, ArrowUpRight, Bot, Check, Clock3, LoaderCircle, Play, Radar, RotateCcw, Trophy, Users } from 'lucide-react'
 import useSWR from 'swr'
-import { api, formatDate, formatScore, mutateApi } from '../api'
+import { api, formatCount, formatDate, formatScore, formatUsd, mutateApi } from '../api'
 import { Empty, PageHeader, Status, Toast, useEscape } from '../components'
 import type { LinkedUser, LowActivityReport, Overview, ScanEstimate, Session } from '../types'
 
@@ -103,9 +103,13 @@ export default function OverviewPage({ session }: { session: Session }) {
   const scanEstimate = estimate && !estimate.estimate.error ? estimate.estimate : undefined
   const timelineMembers = scanEstimate ? scanEstimate.timeline_members - (skipProtected ? Math.min(scanEstimate.timeline_members, estimate?.protected_linked ?? 0) : 0) : 0
   const timelineCredits = readTimelines && scanEstimate ? timelineMembers * timelinePages * 20 * 15 : 0
-  const totalLow = (scanEstimate?.credits_low ?? 0) - (scanEstimate?.timeline_pages ? 0 : 0) + verifyCredits + timelineCredits
-  const totalHigh = (scanEstimate?.credits_high ?? 0) - (scanEstimate?.timeline_credits_max ?? 0) + verifyCredits + timelineCredits
-  const usd = (credits: number) => `$${(credits / 100000).toFixed(2)}`
+  // The scan itself, before the two optional extras. The server's high bound already
+  // carries a timeline allowance, which we replace with the depth actually chosen here.
+  const baseLow = scanEstimate?.credits_low ?? 0
+  const baseHigh = Math.max(baseLow, (scanEstimate?.credits_high ?? 0) - (scanEstimate?.timeline_credits_max ?? 0))
+  const totalLow = baseLow + verifyCredits + timelineCredits
+  const totalHigh = baseHigh + verifyCredits + timelineCredits
+  const usd = formatUsd
 
   const metrics = [
     { label: 'Members scoring', value: data?.linked_members ?? 0, icon: Users, detail: 'have linked an X account' },
@@ -173,7 +177,6 @@ export default function OverviewPage({ session }: { session: Session }) {
           {window !== 'cycle' && <p className="muted small window-note">Points earned on activity in the {WINDOWS.find(([id]) => id === window)?.[1].toLowerCase()}, taken from scans already run. Run a scan covering that window first if it looks empty.</p>}
         </article>
         <aside className="scan-card">
-          <div className="scan-visual"><Sparkles /><div className="orbit one" /><div className="orbit two" /></div>
           <h2>Run a scan</h2>
           <p>Collect recent replies, quotes, retweets, and organic mentions from tracked accounts.</p>
           <label>Lookback window<select value={period} onChange={(event) => setPeriod(event.target.value)}><option value="24h">Last 24 hours</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option><option value="60d">Last 60 days</option><option value="90d">Last 90 days</option><option value="180d">Last 6 months</option><option value="365d">Last 12 months</option></select></label>
@@ -186,16 +189,17 @@ export default function OverviewPage({ session }: { session: Session }) {
       {estimate && <div className="modal-backdrop" onMouseDown={() => { if (!starting) setEstimate(undefined) }}><div className="modal" onMouseDown={(e) => e.stopPropagation()}>
         <div className="modal-icon"><Play /></div><h2>Scan the {PERIOD_LABEL[period] ?? estimate.period}</h2>
         <p>The bot collects replies, quotes, retweets, and mentions on the tracked accounts' posts, then scores every linked member who shows up. Cost depends on how many posts and replies there are, not on the member count.</p>
-        <dl className="estimate-grid">
+        <dl className="estimate-grid" data-dialog-focus tabIndex={-1} aria-live="polite">
           <div><dt>Members who will be scored</dt><dd>{estimate.linked_members - (skipProtected ? estimate.protected_linked : 0)}<small>{skipProtected ? `${estimate.protected_linked} protected skipped` : `${estimate.protected_linked} of them protected`} · {estimate.unlinked_members} without X</small></dd></div>
-          <div><dt>Posts in this window</dt><dd>{scanEstimate ? scanEstimate.source_posts : '—'}<small>{scanEstimate ? `${scanEstimate.engagement_items.toLocaleString()} replies, quotes & retweets to read` : estimate.estimate.error ?? 'could not read the tracked accounts'}</small></dd></div>
-          <div className="wide"><dt>Estimated cost of this scan</dt><dd>{scanEstimate ? `≈ ${totalLow.toLocaleString()} – ${totalHigh.toLocaleString()} credits` : '—'}<small>{scanEstimate ? `${usd(totalLow)} – ${usd(totalHigh)} · posts & engagement ${scanEstimate.engagement_credits + scanEstimate.source_credits} cr · mentions up to ${scanEstimate.mentions_credits_max} cr · hidden-reply sweep up to ${scanEstimate.sweep_credits_max} cr${readTimelines ? ` · member timelines ≈ ${timelineCredits.toLocaleString()} cr` : ''} · X checks ${verifyCredits} cr` : ''}{estimate.previous_scan?.credits != null ? ` · last ${estimate.period} scan actually cost ≈ ${estimate.previous_scan.credits.toLocaleString()} cr (${usd(estimate.previous_scan.credits)})` : ''}</small></dd></div>
+          <div><dt>Posts in this window</dt><dd>{scanEstimate ? scanEstimate.source_posts : '—'}<small>{scanEstimate ? `${formatCount(scanEstimate.engagement_items)} replies, quotes & retweets to read` : estimate.estimate.error ?? 'could not read the tracked accounts'}</small></dd></div>
+          <div className="wide cost-cell"><dt>This scan will cost at most</dt><dd>{scanEstimate ? usd(totalHigh) : '—'}<small>{scanEstimate ? `${usd(totalLow)} if the feeds are short · ${formatCount(totalLow)} to ${formatCount(totalHigh)} credits` : ''}{estimate.previous_scan?.credits != null ? ` · the last ${estimate.period} scan really cost ${usd(estimate.previous_scan.credits)}` : ''}</small></dd></div>
         </dl>
+        {scanEstimate && <p className="cost-breakdown">Made up of: posts and engagement {formatCount(scanEstimate.engagement_credits + scanEstimate.source_credits)} cr · mentions up to {formatCount(scanEstimate.mentions_credits_max)} cr · hidden-reply sweep up to {formatCount(scanEstimate.sweep_credits_max)} cr{verifyX ? <> · X checks {formatCount(verifyCredits)} cr</> : null}{readTimelines ? <> · member timelines up to {formatCount(timelineCredits)} cr</> : null}</p>}
         {scanEstimate?.warnings.length ? <p className="estimate-warning">{scanEstimate.warnings.join(' ')}</p> : null}
         <label className="check-row"><input type="checkbox" checked={skipProtected} onChange={(e) => setSkipProtected(e.target.checked)} disabled={starting} /> Skip protected members ({estimate.protected_linked}): not scored, not X-checked. Their existing points stay as they are.</label>
-        <label className="check-row"><input type="checkbox" checked={verifyX} onChange={(e) => setVerifyX(e.target.checked)} disabled={starting} /> Verify X accounts during this scan ({verifyCount} accounts · ≈ {verifyCredits.toLocaleString()} credits)</label>
-        <label className="check-row"><input type="checkbox" checked={readTimelines} onChange={(e) => setReadTimelines(e.target.checked)} disabled={starting} /> Deep check: also read every member's own timeline to catch replies X hides everywhere else ({timelineMembers} members). Off again next time.</label>
-        {readTimelines && <div className="check-row nested depth-row"><span>Latest tweets per member:</span><div className="segmented">{[20, 100, 300, 500, 1000].map((n) => <button type="button" key={n} className={timelineTweets === n ? 'active' : ''} onClick={() => setTimelineTweets(n)} disabled={starting}>{n.toLocaleString()}</button>)}</div><label className="depth-custom">custom<input type="number" min={20} max={5000} step={20} value={timelineTweets} onChange={(e) => setTimelineTweets(Math.min(5000, Math.max(20, Number(e.target.value) || 20)))} disabled={starting} /></label><span className="muted">≈ {timelineCredits.toLocaleString()} credits ({usd(timelineCredits)}) at most, less when it reaches the window start first</span></div>}
+        <label className="check-row"><input type="checkbox" checked={verifyX} onChange={(e) => setVerifyX(e.target.checked)} disabled={starting} /> Verify X accounts during this scan ({verifyCount} accounts)<strong className="cost-delta">{verifyX ? `included: ${usd(verifyCount * (estimate.verification_credits_per_account ?? 10))}` : `adds ${usd(verifyCount * (estimate.verification_credits_per_account ?? 10))}`}</strong></label>
+        <label className="check-row"><input type="checkbox" checked={readTimelines} onChange={(e) => setReadTimelines(e.target.checked)} disabled={starting} /> Deep check: also read every member's own timeline to catch replies X hides everywhere else ({timelineMembers} members). Off again next time.<strong className="cost-delta">{readTimelines ? `included: up to ${usd(timelineCredits)}` : `adds up to ${usd(timelineMembers * timelinePages * 20 * 15)}`}</strong></label>
+        {readTimelines && <div className="check-row nested depth-row"><span>Latest tweets per member:</span><div className="segmented">{[20, 100, 300, 500, 1000].map((n) => <button type="button" key={n} className={timelineTweets === n ? 'active' : ''} onClick={() => setTimelineTweets(n)} disabled={starting}>{formatCount(n)}</button>)}</div><label className="depth-custom">custom<input type="number" min={20} max={5000} step={20} value={timelineTweets} onChange={(e) => setTimelineTweets(Math.min(5000, Math.max(20, Number(e.target.value) || 20)))} disabled={starting} /></label><span className="muted">{usd(timelineCredits)} at most, less when it reaches the window start first</span></div>}
         <div className="modal-actions"><button type="button" className="button ghost" onClick={() => setEstimate(undefined)} disabled={starting}>Cancel</button><button className="button primary" onClick={scan} disabled={starting}><Play size={16} />{starting ? 'Starting…' : 'Start scan'}</button></div>
       </div></div>}
       {showReset && <div className="modal-backdrop" onMouseDown={() => { if (!resetting) setShowReset(false) }}><div className="modal" onMouseDown={(e) => e.stopPropagation()}>
