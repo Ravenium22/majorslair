@@ -108,15 +108,18 @@ export default function MembersPage({ session }: { session: Session }) {
   const toggleActive = (user: LinkedUser) => patch(user, { active: !user.active }, `${user.discord_username} ${user.active ? 'deactivated' : 'reactivated'}.`)
   const toggleProtected = (user: LinkedUser) => patch(user, { special_role: !user.special_role }, `${user.discord_username} is ${user.special_role ? 'no longer protected' : 'now protected from the low-activity report'}.`)
 
+  const [linking, setLinking] = useState(false)
   const link = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const values = Object.fromEntries(new FormData(event.currentTarget))
+    setLinking(true)
     try {
       await mutateApi('/api/users/link', session.csrf_token, 'POST', values)
       setNotice({ text: 'Member linked and X profile verified.', kind: 'success' })
       setShowLink(false)
       await mutate()
     } catch (error) { setNotice({ text: error instanceof Error ? error.message : 'Link failed', kind: 'error' }) }
+    finally { setLinking(false) }
   }
 
   const closeImport = () => { if (importing) return; setShowImport(false); setImportRows([]); setImportName(''); setImportResult(undefined) }
@@ -290,13 +293,12 @@ export default function MembersPage({ session }: { session: Session }) {
   useEscape(anyModal && !anyBusy, () => { setShowLink(false); setShowImport(false); setShowRoles(false); setSelected(undefined); setEditing(false); setSyncResult(undefined); setVerifyResult(undefined); setVerifyPlan(undefined) })
 
   return <div className="page">
-    <PageHeader eyebrow="Community registry" title="Linked members" copy="Everyone in the community, with or without an X account. Protected members never appear in the low-activity report." actions={<>
+    <PageHeader eyebrow="Community registry" title="Linked members" copy="Everyone in the community, with or without an X account. Protected members never appear in the low-activity report." actions={<button className="button primary" onClick={() => setShowLink(true)}><Plus size={17} /> Link member</button>} toolbar={<>
       <button className="button" onClick={openVerify} disabled={verifying} title="Check linked X accounts for suspensions, deletions, and renames (about 10 credits each)"><BadgeCheck size={17} className={verifying ? 'spin' : ''} /> {verifying ? 'Checking X…' : 'Verify X accounts'}</button>
       <button className="button" onClick={runSync} disabled={syncing} title="Register every human member of the Discord server who is missing here"><RefreshCw size={17} className={syncing ? 'spin' : ''} /> {syncing ? 'Syncing…' : 'Sync from Discord'}</button>
       <button className="button" onClick={openRoles}><Tags size={17} /> Give role</button>
       <button className="button" onClick={() => setShowImport(true)}><FileUp size={17} /> Import CSV</button>
       <a className="button" href={`/api/users/export?${filterQuery}`} title="Download the list exactly as filtered below"><Download size={17} /> Export CSV</a>
-      <button className="button primary" onClick={() => setShowLink(true)}><Plus size={17} /> Link member</button>
     </>} />
     {notice && <Toast message={notice.text} kind={notice.kind} />}
     <section className="panel">
@@ -389,10 +391,10 @@ export default function MembersPage({ session }: { session: Session }) {
       <p className="muted small">Current page filters: {[segment !== 'everyone' ? SEGMENTS.find((s) => s.id === segment)?.label : null, protection !== 'any' ? PROTECTION.find((s) => s.id === protection)?.label : null, points !== 'any' ? POINTS.find((s) => s.id === points)?.label : null, joined !== 'any' ? JOINED.find((s) => s.id === joined)?.label : null, filter, search ? `search "${search}"` : null].filter(Boolean).join(' · ') || 'none'}</p>
       {rolePreview && !roleResult && <><p className="import-summary"><strong>{rolePreview.matched}</strong> members match. {rolePreview.matched > 500 ? 'Showing the first 500.' : ''}</p><div className="table-wrap import-results"><table><tbody>{rolePreview.members?.map((m) => <tr key={m.discord_user_id}><td><span className="member-cell"><strong>{m.discord_username}</strong><small className="mono">{m.discord_user_id}</small></span></td><td className="score">{formatScore(m.score)}</td><td>{m.special_role ? <span className="status complete"><i />Protected</span> : ''}</td></tr>)}</tbody></table></div></>}
       {roleResult && <><p className="import-summary">{roleAction === 'add' ? 'Gave' : 'Removed'} the role for <strong>{roleResult.changed?.length ?? 0}</strong> of {roleResult.matched} members{roleResult.failed?.length ? ` · ${roleResult.failed.length} failed` : ''}.</p>{roleResult.failed && roleResult.failed.length > 0 && <div className="table-wrap import-results"><table><tbody>{roleResult.failed.map((f) => <tr key={f.discord_user_id}><td><span className="member-cell"><strong>{f.discord_username}</strong><small className="mono">{f.discord_user_id}</small></span></td><td className="muted">{f.error}</td></tr>)}</tbody></table></div>}</>}
-      <div className="modal-actions"><button type="button" className="button ghost" onClick={() => setShowRoles(false)} disabled={roleBusy}>{roleResult ? 'Done' : 'Cancel'}</button>{!roleResult && <button type="button" className="button" onClick={previewRoles} disabled={roleBusy}>{roleBusy ? 'Working…' : 'Preview who matches'}</button>}{!roleResult && <button type="button" className="button primary" onClick={applyRoles} disabled={roleBusy || !roleId || !rolePreview}>{roleBusy ? 'Working…' : roleAction === 'add' ? `Give role to ${rolePreview?.matched ?? '…'} members` : `Remove role from ${rolePreview?.matched ?? '…'} members`}</button>}</div>
+      <div className="modal-actions"><button type="button" className="button ghost" onClick={() => setShowRoles(false)} disabled={roleBusy}>{roleResult ? 'Done' : 'Cancel'}</button>{!roleResult && <button type="button" className="button" onClick={previewRoles} disabled={roleBusy}>{roleBusy ? 'Working…' : 'Preview who matches'}</button>}{!roleResult && <button type="button" className="button primary" onClick={applyRoles} disabled={roleBusy || !roleId || !rolePreview} title={!rolePreview ? 'Preview first' : undefined}>{roleBusy ? 'Working…' : !rolePreview ? 'Preview first' : roleAction === 'add' ? `Give role to ${rolePreview.matched} members` : `Remove role from ${rolePreview.matched} members`}</button>}</div>
     </div></div>}
 
-    {showLink && <div className="modal-backdrop" onMouseDown={() => setShowLink(false)}><form className="modal" onSubmit={link} onMouseDown={(e) => e.stopPropagation()}><div className="modal-icon"><ShieldCheck /></div><p className="eyebrow">Verified identity</p><h2>Link a member</h2><p>Use the Discord username (the handle shown in the profile, not the nickname). The X handle is resolved through twitterapi.io and its stable account ID is stored.</p><label>Discord user ID<input required name="discord_user_id" pattern="\d+" placeholder="123456789012345678" /></label><label>Discord handle<input required name="discord_username" placeholder="luna.luna12" autoCapitalize="none" spellCheck={false} /></label><label>X handle<input required name="twitter_handle" placeholder="@handle" /></label><div className="modal-actions"><button type="button" className="button ghost" onClick={() => setShowLink(false)}>Cancel</button><button className="button primary">Verify & link</button></div></form></div>}
+    {showLink && <div className="modal-backdrop" onMouseDown={() => setShowLink(false)}><form className="modal" onSubmit={link} onMouseDown={(e) => e.stopPropagation()}><div className="modal-icon"><ShieldCheck /></div><p className="eyebrow">Verified identity</p><h2>Link a member</h2><p>Use the Discord username (the handle shown in the profile, not the nickname). The X handle is resolved through twitterapi.io and its stable account ID is stored.</p><label>Discord user ID<input required name="discord_user_id" pattern="\d+" inputMode="numeric" placeholder="123456789012345678" disabled={linking} /><small className="field-hint">Discord → User Settings → Advanced → Developer Mode on, then right-click the member → Copy User ID.</small></label><label>Discord handle<input required name="discord_username" placeholder="luna.luna12" autoCapitalize="none" spellCheck={false} disabled={linking} /></label><label>X handle<input required name="twitter_handle" placeholder="@handle" autoCapitalize="none" spellCheck={false} disabled={linking} /></label><div className="modal-actions"><button type="button" className="button ghost" onClick={() => setShowLink(false)} disabled={linking}>Cancel</button><button className="button primary" disabled={linking}>{linking ? 'Verifying on X…' : 'Verify & link'}</button></div></form></div>}
 
     {showImport && <div className="modal-backdrop" onMouseDown={closeImport}><div className="modal modal-wide" onMouseDown={(e) => e.stopPropagation()}>
       <div className="modal-icon"><FileUp /></div><p className="eyebrow">Bulk registry</p><h2>Import members from a spreadsheet</h2>

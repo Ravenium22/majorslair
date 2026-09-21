@@ -217,3 +217,8 @@ a.button { text-decoration: none; }
 .loading-row { display: flex; align-items: center; gap: 8px; padding: 18px 20px; margin: 0; color: var(--muted); font: 10px "Cascadia Mono", Consolas, monospace; letter-spacing: .08em; text-transform: uppercase; }
 .posts-toolbar { margin-bottom: 16px; }.posts-toolbar .toolbar { border-bottom: 0; }
 .scan-row:focus-visible td, .member-row:focus-visible td { background: #101414; }
+.page-header.has-toolbar { display: block; }
+.page-header-main { display: flex; align-items: flex-end; justify-content: space-between; gap: 32px; }
+.header-toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line-soft); }
+.field-hint { display: block; margin-top: 6px; color: var(--muted); font-size: 11px; line-height: 1.5; text-transform: none; letter-spacing: 0; font-weight: 400; }
+@media (max-width: 760px) { .page-header-main { flex-direction: column; align-items: flex-start; gap: 14px; } }

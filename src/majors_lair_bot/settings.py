@@ -125,7 +125,7 @@ class Settings:
             twitter_api_key=_required("TWITTERAPI_IO_KEY"),
             database_url=_required("DATABASE_URL"),
             app_base_url=app_base_url,
-            admin_session_ttl_hours=_positive_int("ADMIN_SESSION_TTL_HOURS", default=12),
+            admin_session_ttl_hours=_positive_int("ADMIN_SESSION_TTL_HOURS", default=168),
             session_cookie_secure=_bool(
                 "SESSION_COOKIE_SECURE", default=app_base_url.startswith("https://")
             ),

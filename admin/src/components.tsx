@@ -20,16 +20,22 @@ export function PageHeader({
   title,
   copy,
   actions,
+  toolbar,
 }: {
   eyebrow: string
   title: string
   copy: string
   actions?: ReactNode
+  /** Secondary tools rendered on their own row under the title, so many buttons never squeeze it. */
+  toolbar?: ReactNode
 }) {
   return (
-    <header className="page-header">
-      <div><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><p>{copy}</p></div>
-      {actions && <div className="header-actions">{actions}</div>}
+    <header className={`page-header ${toolbar ? 'has-toolbar' : ''}`}>
+      <div className="page-header-main">
+        <div><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><p>{copy}</p></div>
+        {actions && <div className="header-actions">{actions}</div>}
+      </div>
+      {toolbar && <div className="header-toolbar">{toolbar}</div>}
     </header>
   )
 }

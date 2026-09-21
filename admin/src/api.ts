@@ -18,6 +18,11 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   })
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}))
+    if (response.status === 401 && path !== '/api/session') {
+      // The session expired mid-work: hand the person back to the login screen rather
+      // than surfacing "Sign in with Discord" as an error on whatever they clicked.
+      window.setTimeout(() => window.location.reload(), 50)
+    }
     throw new ApiError(response.status, payload.detail ?? `Request failed (${response.status})`)
   }
   if (response.status === 204) return undefined as T
