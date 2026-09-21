@@ -103,7 +103,9 @@ export type AuditEntry = {
   event_id: string
   event_type: string
   actor_discord_id: string
+  actor_name?: string
   subject_discord_id: string
+  subject_name?: string
   old_value: string
   new_value: string
   details: Record<string, unknown>

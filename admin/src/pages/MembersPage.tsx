@@ -2,7 +2,7 @@ import { useMemo, useState, type ChangeEvent, type FormEvent } from 'react'
 import { ArrowLeftRight, BadgeCheck, Download, ExternalLink, FileUp, Pencil, Plus, RefreshCw, Search, Shield, ShieldCheck, ShieldOff, Tags, UserRoundCheck, UserRoundX, X } from 'lucide-react'
 import useSWR from 'swr'
 import { api, formatDate, formatScore, mutateApi } from '../api'
-import { Empty, PageHeader, Pagination, Toast } from '../components'
+import { Empty, Loading, PageHeader, Pagination, Toast, useEscape } from '../components'
 import { parseCsv, rowsFromSheet, type ImportRow } from '../csv'
 import type { Action, Adjustment, DiscordRole, DiscordSyncResponse, ImportResponse, ImportStatus, LinkedUser, MemberScanResult, Paginated, RoleBulkResult, Session, VerifyResponse } from '../types'
 
@@ -285,6 +285,10 @@ export default function MembersPage({ session }: { session: Session }) {
     finally { setSaving(false) }
   }
 
+  const anyModal = Boolean(showLink || showImport || showRoles || selected || syncResult || verifyResult || verifyPlan)
+  const anyBusy = importing || saving || roleBusy || verifying || memberScanning || syncing || adjusting
+  useEscape(anyModal && !anyBusy, () => { setShowLink(false); setShowImport(false); setShowRoles(false); setSelected(undefined); setEditing(false); setSyncResult(undefined); setVerifyResult(undefined); setVerifyPlan(undefined) })
+
   return <div className="page">
     <PageHeader eyebrow="Community registry" title="Linked members" copy="Everyone in the community, with or without an X account. Protected members never appear in the low-activity report." actions={<>
       <button className="button" onClick={openVerify} disabled={verifying} title="Check linked X accounts for suspensions, deletions, and renames (about 10 credits each)"><BadgeCheck size={17} className={verifying ? 'spin' : ''} /> {verifying ? 'Checking X…' : 'Verify X accounts'}</button>
@@ -324,6 +328,7 @@ export default function MembersPage({ session }: { session: Session }) {
           </td>
         </tr>)}
       </tbody></table></div>
+      {isLoading && !data && <Loading label="Loading members…" />}
       {!isLoading && !data?.items.length && <Empty title="No matching members" copy="Change the filters, sync from Discord, or import the community sheet." />}
       <Pagination page={page} size={25} total={data?.total ?? 0} onChange={setPage} />
     </section>

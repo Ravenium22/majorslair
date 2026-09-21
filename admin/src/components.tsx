@@ -1,5 +1,19 @@
-import type { ReactNode } from 'react'
-import { AlertCircle, Check, LoaderCircle } from 'lucide-react'
+import { useEffect, useState, type ReactNode } from 'react'
+import { AlertCircle, Check, LoaderCircle, X } from 'lucide-react'
+
+/** Close something with the Escape key while it is open. */
+export function useEscape(active: boolean, onClose: () => void) {
+  useEffect(() => {
+    if (!active) return
+    const handler = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [active, onClose])
+}
+
+export function Loading({ label = 'Loading…' }: { label?: string }) {
+  return <p className="loading-row" role="status"><LoaderCircle className="spin" size={16} /> {label}</p>
+}
 
 export function PageHeader({
   eyebrow,
@@ -30,10 +44,19 @@ export function Empty({ title, copy }: { title: string; copy: string }) {
 }
 
 export function Toast({ message, kind = 'success' }: { message: string; kind?: 'success' | 'error' | 'loading' }) {
+  const [visible, setVisible] = useState(true)
+  useEffect(() => {
+    setVisible(true)
+    if (kind === 'loading') return
+    const timer = setTimeout(() => setVisible(false), kind === 'error' ? 10000 : 6000)
+    return () => clearTimeout(timer)
+  }, [message, kind])
+  if (!visible) return null
   return (
-    <div className={`toast ${kind}`}>
+    <div className={`toast ${kind}`} role={kind === 'error' ? 'alert' : 'status'}>
       {kind === 'loading' ? <LoaderCircle className="spin" size={17} /> : kind === 'success' ? <Check size={17} /> : <AlertCircle size={17} />}
-      {message}
+      <span>{message}</span>
+      <button className="toast-close" onClick={() => setVisible(false)} aria-label="Dismiss"><X size={14} /></button>
     </div>
   )
 }

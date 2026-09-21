@@ -42,10 +42,14 @@ export const formatScore = (value: number) =>
 
 export const formatDate = (value?: string) => {
   if (!value) return 'Never'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  const sameYear = date.getFullYear() === new Date().getFullYear()
   return new Intl.DateTimeFormat('en', {
     month: 'short',
     day: 'numeric',
+    ...(sameYear ? {} : { year: 'numeric' }),
     hour: '2-digit',
     minute: '2-digit',
-  }).format(new Date(value))
+  }).format(date)
 }

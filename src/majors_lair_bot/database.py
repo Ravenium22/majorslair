@@ -1123,13 +1123,27 @@ class DatabaseRepository:
         async with self.sessions() as session:
             total = int(await session.scalar(count_statement) or 0)
             rows = (await session.scalars(statement)).all()
+            ids = {row.actor_discord_id for row in rows} | {row.subject_discord_id for row in rows}
+            ids.discard("")
+            names: dict[str, str] = {}
+            if ids:
+                for user_id, username in (
+                    await session.execute(
+                        select(UserRow.discord_user_id, UserRow.discord_username).where(
+                            UserRow.discord_user_id.in_(ids)
+                        )
+                    )
+                ).all():
+                    names[user_id] = username
         return {
             "items": [
                 {
                     "event_id": row.event_id,
                     "event_type": row.event_type,
                     "actor_discord_id": row.actor_discord_id,
+                    "actor_name": names.get(row.actor_discord_id, ""),
                     "subject_discord_id": row.subject_discord_id,
+                    "subject_name": names.get(row.subject_discord_id, ""),
                     "old_value": row.old_value,
                     "new_value": row.new_value,
                     "details": row.details,

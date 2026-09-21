@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Activity, ArrowUpRight, Bot, Clock3, Play, Radar, Sparkles, Trophy, Users } from 'lucide-react'
 import useSWR from 'swr'
 import { api, formatDate, formatScore, mutateApi } from '../api'
-import { Empty, PageHeader, Status, Toast } from '../components'
+import { Empty, PageHeader, Status, Toast, useEscape } from '../components'
 import type { LinkedUser, Overview, ScanEstimate, Session } from '../types'
 
 const WINDOWS = [['cycle', 'Whole cycle'], ['30d', 'Last 30 days'], ['60d', 'Last 60 days'], ['90d', 'Last 90 days'], ['180d', 'Last 6 months'], ['365d', 'Last 12 months']] as const
@@ -50,6 +50,7 @@ export default function OverviewPage({ session }: { session: Session }) {
     } finally { setStarting(false) }
   }
 
+  useEscape(Boolean(estimate) && !starting, () => setEstimate(undefined))
   const verifyCount = estimate ? estimate.linked_members - (skipProtected ? estimate.protected_linked : 0) : 0
   const verifyCredits = verifyX ? verifyCount * (estimate?.verification_credits_per_account ?? 10) : 0
   const scanEstimate = estimate && !estimate.estimate.error ? estimate.estimate : undefined

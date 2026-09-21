@@ -211,3 +211,9 @@ a.button { text-decoration: none; }
 @media (max-width: 900px) { .adjust-form { grid-template-columns: 1fr; } }
 .role-grid { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 0 14px; }
 @media (max-width: 720px) { .role-grid { grid-template-columns: 1fr 1fr; } }
+:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+.header-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.toast { align-items: flex-start; }.toast > span { flex: 1; line-height: 1.45; }.toast-close { flex: none; border: 0; background: transparent; color: inherit; opacity: .7; cursor: pointer; padding: 2px; margin: -2px -4px -2px 0; }.toast-close:hover { opacity: 1; }
+.loading-row { display: flex; align-items: center; gap: 8px; padding: 18px 20px; margin: 0; color: var(--muted); font: 10px "Cascadia Mono", Consolas, monospace; letter-spacing: .08em; text-transform: uppercase; }
+.posts-toolbar { margin-bottom: 16px; }.posts-toolbar .toolbar { border-bottom: 0; }
+.scan-row:focus-visible td, .member-row:focus-visible td { background: #101414; }

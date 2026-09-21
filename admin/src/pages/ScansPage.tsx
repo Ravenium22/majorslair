@@ -2,7 +2,7 @@ import { Fragment, useState } from 'react'
 import { ChevronDown, ChevronRight, Download, ScrollText } from 'lucide-react'
 import useSWR from 'swr'
 import { api, formatDate, formatScore } from '../api'
-import { Empty, PageHeader, Pagination, Status } from '../components'
+import { Empty, Loading, PageHeader, Pagination, Status } from '../components'
 import type { Paginated, ScanRun, Snapshot } from '../types'
 
 const PAGE_SIZE = 25
@@ -121,6 +121,7 @@ export default function ScansPage() {
           </Fragment>
         })}
       </tbody></table></div>
+      {isLoading && !data && <Loading label="Loading scan reports…" />}
       {!isLoading && !data?.items.length && <Empty title="No scans yet" copy="Run an engagement scan from the Overview page or with /check-engagement in Discord." />}
       <Pagination page={page} size={PAGE_SIZE} total={data?.total ?? 0} onChange={setPage} />
     </section>
