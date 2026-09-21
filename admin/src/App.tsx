@@ -11,6 +11,7 @@ import {
   Menu,
   Radar,
   ScrollText,
+  UserRoundMinus,
   Settings2,
   Users,
   X,
@@ -38,10 +39,12 @@ function lazyPage<T extends { default: React.ComponentType<any> }>(load: () => P
 const ActivityPage = lazyPage(() => import('./pages/ActivityPage'))
 const AuditPage = lazyPage(() => import('./pages/AuditPage'))
 const ScansPage = lazyPage(() => import('./pages/ScansPage'))
+const LowActivityPage = lazyPage(() => import('./pages/LowActivityPage'))
 
 const routes = [
   { id: 'overview', label: 'Overview', icon: CircleGauge },
   { id: 'members', label: 'Members', icon: Users },
+  { id: 'low-activity', label: 'Low-activity report', icon: UserRoundMinus },
   { id: 'activity', label: 'Activity log', icon: Activity },
   { id: 'posts', label: 'Tracked posts', icon: Radar },
   { id: 'scans', label: 'Scan reports', icon: ScrollText },
@@ -119,6 +122,7 @@ function Shell({ session, children }: { session: Session; children: ReactNode })
       case 'activity': return <ActivityPage session={session} />
       case 'posts': return <PostsPage session={session} />
       case 'scans': return <ScansPage />
+      case 'low-activity': return <LowActivityPage />
       case 'scoring': return <ScoringPage session={session} />
       case 'audit': return <AuditPage />
       default: return <OverviewPage session={session} />

@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Activity, ArrowUpRight, Bot, Clock3, Play, Radar, Sparkles, Trophy, Users } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Activity, ArrowUpRight, Bot, Check, Clock3, LoaderCircle, Play, Radar, Sparkles, Trophy, Users } from 'lucide-react'
 import useSWR from 'swr'
 import { api, formatDate, formatScore, mutateApi } from '../api'
 import { Empty, PageHeader, Status, Toast, useEscape } from '../components'
@@ -23,6 +23,28 @@ export default function OverviewPage({ session }: { session: Session }) {
   const [timelineTweets, setTimelineTweets] = useState(20)
   const timelinePages = Math.min(250, Math.max(1, Math.ceil(timelineTweets / 20)))
   const [starting, setStarting] = useState(false)
+  const [now, setNow] = useState(() => Date.now())
+  const running = data?.last_scan?.status === 'running'
+  const wasRunning = useRef(false)
+  // A long scan used to show nothing but a pulsing dot. Tick a clock while it runs and
+  // announce the result once, so leaving the page and coming back still makes sense.
+  useEffect(() => {
+    if (!running) return
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [running])
+  useEffect(() => {
+    if (running) { wasRunning.current = true; return }
+    if (!wasRunning.current || !data?.last_scan) return
+    wasRunning.current = false
+    const scan = data.last_scan
+    const matched = Number(scan.summary?.discovered ?? 0)
+    setNotice(scan.status === 'failed'
+      ? { text: `The ${scan.period} scan failed: ${scan.error || 'unknown error'}`, kind: 'error' }
+      : { text: `The ${scan.period} scan finished: ${matched} actions matched. Open Scan reports for the full report.`, kind: 'success' })
+  }, [running, data?.last_scan])
+  const elapsed = data?.last_scan?.started_at ? Math.max(0, Math.floor((now - new Date(data.last_scan.started_at).getTime()) / 1000)) : 0
+  const elapsedLabel = elapsed < 60 ? `${elapsed}s` : `${Math.floor(elapsed / 60)} min ${elapsed % 60}s`
 
   const [loadingEstimate, setLoadingEstimate] = useState(false)
 
@@ -110,8 +132,10 @@ export default function OverviewPage({ session }: { session: Session }) {
           <h2>Refresh the signal</h2>
           <p>Collect recent replies, quotes, retweets, and organic mentions from tracked accounts.</p>
           <label>Lookback window<select value={period} onChange={(event) => setPeriod(event.target.value)}><option value="24h">Last 24 hours</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option><option value="60d">Last 60 days</option><option value="90d">Last 90 days</option><option value="180d">Last 6 months</option><option value="365d">Last 12 months</option></select></label>
-          <button className="button primary" onClick={openScan} disabled={data?.last_scan?.status === 'running' || loadingEstimate}><Play size={17} />{data?.last_scan?.status === 'running' ? 'Scan running' : loadingEstimate ? 'Estimating cost…' : 'Run engagement scan'}</button>
-          <small><Clock3 size={13} /> Last completed {formatDate(data?.last_scan?.completed_at)}</small>
+          <button className="button primary" onClick={openScan} disabled={running || loadingEstimate}><Play size={17} />{running ? 'Scan running' : loadingEstimate ? 'Estimating cost…' : 'Run engagement scan'}</button>
+          {running
+            ? <div className="scan-progress"><p><LoaderCircle className="spin" size={15} /> Scanning the {data?.last_scan?.period} window · {elapsedLabel} so far</p><small>A long window can take 15 minutes. You can leave this page; the report appears under Scan reports when it finishes.</small></div>
+            : <small><Clock3 size={13} /> {data?.last_scan?.status === 'failed' ? 'Last scan failed' : 'Last completed'} {formatDate(data?.last_scan?.completed_at)}{data?.last_scan?.status === 'complete' && <> · <Check size={12} /> {String(data.last_scan.summary?.discovered ?? 0)} actions matched</>}</small>}
         </aside>
       </section>
       {estimate && <div className="modal-backdrop" onMouseDown={() => { if (!starting) setEstimate(undefined) }}><div className="modal" onMouseDown={(e) => e.stopPropagation()}>

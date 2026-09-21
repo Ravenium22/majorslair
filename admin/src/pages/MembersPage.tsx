@@ -109,7 +109,11 @@ export default function MembersPage({ session }: { session: Session }) {
       await mutate()
     } catch (error) { setNotice({ text: error instanceof Error ? error.message : 'Update failed', kind: 'error' }) }
   }
-  const toggleActive = (user: LinkedUser) => patch(user, { active: !user.active }, `${user.discord_username} ${user.active ? 'deactivated' : 'reactivated'}.`)
+  const [confirmDeactivate, setConfirmDeactivate] = useState<LinkedUser>()
+  const toggleActive = (user: LinkedUser) => {
+    if (user.active) { setConfirmDeactivate(user); return }
+    return patch(user, { active: true }, `${user.discord_username} reactivated.`)
+  }
   const toggleProtected = (user: LinkedUser) => patch(user, { special_role: !user.special_role }, `${user.discord_username} is ${user.special_role ? 'no longer protected' : 'now protected from the low-activity report'}.`)
 
   const [linking, setLinking] = useState(false)
@@ -389,6 +393,12 @@ export default function MembersPage({ session }: { session: Session }) {
       {history?.items.length ? <div className="table-wrap standings-table"><table><thead><tr><th>Type</th><th>Target</th><th>Content / decision</th><th>Points</th><th>When</th><th /></tr></thead><tbody>
         {history.items.map((item) => <tr key={item.action_key} className={item.active ? '' : 'muted-row'}><td><span className={`action-chip ${item.action_type}`}>{item.action_type}</span></td><td>@{item.target_handle}</td><td className="decision"><strong>{item.text || 'Native retweet'}</strong><small>{item.reason}{!item.active ? ' · no longer public' : ''}</small></td><td className={`score ${item.points > 0 ? 'gain' : ''}`}>{formatScore(item.points)}</td><td>{formatDate(item.occurred_at)}</td><td>{item.action_url && <a className="icon-button" href={item.action_url} target="_blank" title="Open on X"><ExternalLink size={15} /></a>}</td></tr>)}
       </tbody></table></div> : history ? <p className="muted small">No matched actions in this cycle. If they did interact, check the X handle above is the account they used, then run a scan that covers the date.</p> : null}
+    </div></div>}
+
+    {confirmDeactivate && <div className="modal-backdrop" onMouseDown={() => setConfirmDeactivate(undefined)}><div className="modal" onMouseDown={(e) => e.stopPropagation()}>
+      <div className="modal-icon"><UserRoundX /></div><h2>Deactivate {confirmDeactivate.discord_username}?</h2>
+      <p>They drop out of the leaderboard, the low-activity report and every scan. Their history and points are kept, and you can reactivate them at any time.</p>
+      <div className="modal-actions"><button className="button ghost" onClick={() => setConfirmDeactivate(undefined)}>Cancel</button><button className="button danger" onClick={() => { const user = confirmDeactivate; setConfirmDeactivate(undefined); void patch(user, { active: false }, `${user.discord_username} deactivated.`) }}>Deactivate</button></div>
     </div></div>}
 
     {showRoles && <div className="modal-backdrop" onMouseDown={() => { if (!roleBusy) setShowRoles(false) }}><div className="modal modal-wide" onMouseDown={(e) => e.stopPropagation()}>

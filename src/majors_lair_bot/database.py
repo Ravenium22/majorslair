@@ -8,7 +8,7 @@ from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -400,6 +400,48 @@ class DatabaseRepository:
         async with self.sessions() as session:
             rows = (await session.scalars(statement)).all()
         return [self._linked_user(row) for row in rows]
+
+    async def low_activity_report(self, threshold: float, *, grace_days: int = 0) -> dict[str, Any]:
+        """Removal candidates plus how many members each protection rule kept off the list."""
+        base = [UserRow.active.is_(True), UserRow.score <= threshold]
+        newcomer = None
+        if grace_days > 0:
+            cutoff = utc_now() - timedelta(days=grace_days)
+            newcomer = and_(
+                UserRow.discord_joined_at.is_not(None), UserRow.discord_joined_at > cutoff
+            )
+
+        def count(*extra: Any) -> Any:
+            return select(func.count()).select_from(UserRow).where(*base, *extra)
+
+        filters = [*base, UserRow.special_role.is_(False)]
+        if newcomer is not None:
+            filters.append(~newcomer)
+        async with self.sessions() as session:
+            protected = int(await session.scalar(count(UserRow.special_role.is_(True))) or 0)
+            newcomers = 0
+            if newcomer is not None:
+                newcomers = int(
+                    await session.scalar(count(UserRow.special_role.is_(False), newcomer)) or 0
+                )
+            rows = (
+                await session.scalars(
+                    select(UserRow)
+                    .where(*filters)
+                    .order_by(
+                        UserRow.score,
+                        UserRow.twitter_user_id.is_not(None),
+                        UserRow.discord_username,
+                    )
+                )
+            ).all()
+        return {
+            "threshold": threshold,
+            "newcomer_grace_days": grace_days,
+            "excluded_protected": protected,
+            "excluded_newcomers": newcomers,
+            "items": [asdict(self._linked_user(row)) for row in rows],
+        }
 
     async def append_audit(
         self,

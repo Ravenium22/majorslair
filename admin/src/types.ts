@@ -189,6 +189,15 @@ export type Snapshot = {
 export type DiscordRole = { id: string; name: string; color: number; position: number; managed: boolean; assignable: boolean; booster: boolean }
 export type RoleBulkResult = { matched: number; members?: LinkedUser[]; changed?: { discord_user_id: string; discord_username: string }[]; failed?: { discord_user_id: string; discord_username: string; error: string }[]; skipped?: { discord_user_id: string; discord_username: string; roles: string }[] }
 
+export type LowActivityReport = {
+  threshold: number
+  newcomer_grace_days: number
+  excluded_protected: number
+  excluded_newcomers: number
+  include_protected: boolean
+  items: LinkedUser[]
+}
+
 export type Adjustment = {
   adjustment_id: string
   cycle_id: string

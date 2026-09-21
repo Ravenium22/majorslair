@@ -373,3 +373,49 @@ async def test_point_adjustments_and_transfers_survive_rescoring(
     assert (await repository.find_member("2")).discord_user_id == "2"
     assert (await repository.find_member("alice")).discord_user_id == "1"
     assert await repository.find_member("nobody") is None
+
+
+@pytest.mark.asyncio
+async def test_low_activity_report_states_what_it_excluded(
+    repository: DatabaseRepository,
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC)
+    # Quiet, established, not protected: the only real candidate.
+    await repository.register_member(
+        discord_user_id="1", discord_username="quiet", discord_joined_at=now - timedelta(days=200)
+    )
+    # Protected, quiet: never listed.
+    await repository.register_member(
+        discord_user_id="2",
+        discord_username="builder",
+        special_role=True,
+        discord_joined_at=now - timedelta(days=200),
+    )
+    # Joined last week: inside the grace period.
+    await repository.register_member(
+        discord_user_id="3", discord_username="fresh", discord_joined_at=now - timedelta(days=5)
+    )
+    # Join date unknown (never synced): treated as established, so it is listed.
+    await repository.register_member(discord_user_id="4", discord_username="unknown")
+    # Above the threshold.
+    await repository.link_user(
+        discord_user_id="5", discord_username="busy", twitter_handle="busy", twitter_user_id="9"
+    )
+    from majors_lair_bot.orm import UserRow
+
+    async with repository.sessions.begin() as session:
+        (await session.get(UserRow, "5")).score = 40
+
+    report = await repository.low_activity_report(5, grace_days=30)
+
+    assert [item["discord_user_id"] for item in report["items"]] == ["1", "4"]
+    assert report["excluded_protected"] == 1
+    assert report["excluded_newcomers"] == 1
+    assert report["threshold"] == 5 and report["newcomer_grace_days"] == 30
+
+    # Without a grace period the newcomer reappears; protection always applies.
+    plain = await repository.low_activity_report(5, grace_days=0)
+    assert sorted(item["discord_user_id"] for item in plain["items"]) == ["1", "3", "4"]
+    assert plain["excluded_newcomers"] == 0 and plain["excluded_protected"] == 1

@@ -1360,15 +1360,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if threshold is None:
             threshold = float(config_values["low_activity_threshold"])
         grace = int(config_values.get("newcomer_grace_days", DEFAULT_CONFIG["newcomer_grace_days"]))
-        users_list = await runtime.repository.low_activity(
-            threshold, include_protected=include_protected, grace_days=grace
-        )
-        return {
-            "threshold": threshold,
-            "include_protected": include_protected,
-            "newcomer_grace_days": grace,
-            "items": [asdict(user) for user in users_list],
-        }
+        if include_protected:
+            users_list = await runtime.repository.low_activity(
+                threshold, include_protected=True, grace_days=0
+            )
+            return {
+                "threshold": threshold,
+                "include_protected": True,
+                "newcomer_grace_days": 0,
+                "excluded_protected": 0,
+                "excluded_newcomers": 0,
+                "items": [asdict(user) for user in users_list],
+            }
+        report = await runtime.repository.low_activity_report(threshold, grace_days=grace)
+        return {**report, "include_protected": False}
 
     @app.post("/api/reset")
     async def reset(payload: ResetRequest, admin: MutatingAdmin) -> dict[str, Any]:

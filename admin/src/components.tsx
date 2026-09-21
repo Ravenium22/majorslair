@@ -22,7 +22,7 @@ export function PageHeader({
   actions,
   toolbar,
 }: {
-  eyebrow: string
+  eyebrow?: string
   title: string
   copy: string
   actions?: ReactNode
@@ -32,7 +32,7 @@ export function PageHeader({
   return (
     <header className={`page-header ${toolbar ? 'has-toolbar' : ''}`}>
       <div className="page-header-main">
-        <div><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><p>{copy}</p></div>
+        <div>{eyebrow && <p className="eyebrow">{eyebrow}</p>}<h1>{title}</h1><p>{copy}</p></div>
         {actions && <div className="header-actions">{actions}</div>}
       </div>
       {toolbar && <div className="header-toolbar">{toolbar}</div>}

@@ -261,3 +261,14 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .member-scan-controls { flex-wrap: wrap; }
 .threshold-box { display: inline-flex; align-items: center; gap: 6px; margin: 0; color: var(--muted); font-size: 12px; }.threshold-box input { width: 72px; min-height: 32px; margin: 0; padding: 4px 8px; font-size: 12px; }
 .exclude-roles select { min-height: 96px; }
+/* Feedback must sit above the dialog it was fired from, not behind its blur. */
+.toast { z-index: 140; }
+.rules-banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 20px; margin-bottom: 16px; }
+.rules-banner p { margin: 0; font-size: 13px; line-height: 1.6; color: var(--muted); max-width: 70ch; }
+.rules-banner strong { color: var(--text); }
+.save-diff { max-height: 320px; overflow: auto; margin-top: 16px; border: 1px solid var(--line-soft); }
+.save-diff table { width: 100%; }.save-diff td { padding: 8px 12px; font-size: 12px; }
+.save-diff .from { color: var(--muted); text-decoration: line-through; }.save-diff .to { color: var(--amber-bright); }
+.scan-progress { margin-top: 14px; padding: 12px 14px; border: 1px solid #4c4029; background: rgb(231 168 66 / 8%); }
+.scan-progress p { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--text); font-size: 13px; }
+.scan-progress small { display: block; margin-top: 6px; color: var(--muted); font-size: 11px; line-height: 1.5; }
