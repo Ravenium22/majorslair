@@ -358,11 +358,13 @@ export default function MembersPage({ session }: { session: Session }) {
       <div className="member-scan adjust-panel">
         <div><h3 className="sub-heading"><ArrowLeftRight size={13} /> Points: add, remove or transfer</h3><p className="muted small">Manual adjustments are kept separately from scanned actions, so scans and rescoring never undo them. Every one is logged in the Audit trail with who did it and why.</p></div>
         <form className="adjust-form" onSubmit={submitAdjust}>
-          <div className="segmented"><button type="button" className={adjustMode === 'add' ? 'active' : ''} onClick={() => setAdjustMode('add')}>Add / remove</button><button type="button" className={adjustMode === 'transfer' ? 'active' : ''} onClick={() => setAdjustMode('transfer')}>Transfer to someone</button></div>
-          <input name="points" type="number" step="0.5" placeholder={adjustMode === 'transfer' ? 'Amount to move' : 'Points, e.g. 10 or -5'} required disabled={adjusting} />
-          {adjustMode === 'transfer' && <input name="transfer_to" placeholder="Receiver: Discord handle, Discord ID or X handle" required disabled={adjusting} />}
-          <input name="reason" placeholder="Reason (shown in the audit trail)" maxLength={300} disabled={adjusting} />
-          <button className="button primary" disabled={adjusting}>{adjusting ? 'Saving…' : adjustMode === 'transfer' ? 'Transfer points' : 'Apply'}</button>
+          <div className="segmented adjust-mode"><button type="button" className={adjustMode === 'add' ? 'active' : ''} onClick={() => setAdjustMode('add')}>Add / remove</button><button type="button" className={adjustMode === 'transfer' ? 'active' : ''} onClick={() => setAdjustMode('transfer')}>Transfer to someone</button></div>
+          <div className="adjust-fields">
+            <label>{adjustMode === 'transfer' ? 'Amount to move' : 'Points'}<input name="points" type="number" step="0.5" placeholder={adjustMode === 'transfer' ? '10' : '10 to add, -5 to remove'} required disabled={adjusting} /></label>
+            {adjustMode === 'transfer' && <label>Receiver<input name="transfer_to" placeholder="Discord handle, Discord ID or X handle" required disabled={adjusting} autoCapitalize="none" spellCheck={false} /></label>}
+            <label className="grow">Reason<input name="reason" placeholder="Shown in the audit trail and the member's history" maxLength={300} disabled={adjusting} /></label>
+          </div>
+          <div className="modal-actions left"><button className="button primary" disabled={adjusting}>{adjusting ? 'Saving…' : adjustMode === 'transfer' ? 'Transfer points' : adjustMode === 'add' ? 'Apply points' : 'Apply'}</button></div>
         </form>
         {adjustments && adjustments.length > 0 && <div className="table-wrap"><table><thead><tr><th>When</th><th>Points</th><th>Reason</th><th>By</th><th>Counterpart</th></tr></thead><tbody>{adjustments.map((a) => <tr key={a.adjustment_id}><td>{formatDate(a.created_at)}</td><td className={`score ${a.points >= 0 ? 'gain' : 'loss'}`}>{a.points >= 0 ? '+' : ''}{formatScore(a.points)}</td><td className="muted">{a.reason || '—'}</td><td className="mono">{a.actor_discord_id}</td><td className="mono">{a.counterpart_discord_id || '—'}</td></tr>)}</tbody></table></div>}
       </div>
