@@ -15,6 +15,17 @@ from .settings import Settings
 from .twitter_client import TwitterApiClient, TwitterApiError
 from .utils import parse_period, utc_now
 
+# The same windows the dashboard offers, so every command shows one consistent list.
+PERIOD_CHOICES = [
+    app_commands.Choice(name="Last 24 hours", value="24h"),
+    app_commands.Choice(name="Last 7 days", value="7d"),
+    app_commands.Choice(name="Last 30 days", value="30d"),
+    app_commands.Choice(name="Last 60 days", value="60d"),
+    app_commands.Choice(name="Last 90 days", value="90d"),
+    app_commands.Choice(name="Last 6 months", value="180d"),
+    app_commands.Choice(name="Last 12 months", value="365d"),
+]
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -160,9 +171,8 @@ class EngagementCog(commands.Cog):
     @app_commands.command(
         name="leaderboard", description="Show the current public engagement leaderboard"
     )
-    @app_commands.describe(
-        period="Optional trailing window such as 30d, 90d or 180d; default is the whole cycle"
-    )
+    @app_commands.describe(period="Optional window; default is the whole cycle")
+    @app_commands.choices(period=PERIOD_CHOICES)
     @app_commands.guild_only()
     async def leaderboard(
         self, interaction: discord.Interaction, period: str | None = None
@@ -519,9 +529,10 @@ class EngagementCog(commands.Cog):
     )
     @app_commands.describe(
         member="The member to scan",
-        period="Examples: 7d, 30d, 90d",
+        period="Window to read (default: last 30 days)",
         depth="How many of their latest tweets to read at most (default 500, max 2000)",
     )
+    @app_commands.choices(period=PERIOD_CHOICES)
     @app_commands.guild_only()
     @admin_only()
     async def scan_member(
@@ -556,7 +567,7 @@ class EngagementCog(commands.Cog):
         name="check-engagement", description="Scan and score a chosen recent period"
     )
     @app_commands.describe(
-        period="Examples: 24h, 7d, 30d, 90d, 180d, 365d (maximum 366d)",
+        period="Window to scan (default: last 7 days)",
         skip_protected=(
             "Leave special-role members out of scoring and X checks "
             "(default: the skip_protected_members setting)"
@@ -567,6 +578,7 @@ class EngagementCog(commands.Cog):
         ),
         timeline_depth="With read_timelines: how many latest tweets per member (20-2000)",
     )
+    @app_commands.choices(period=PERIOD_CHOICES)
     @app_commands.guild_only()
     @admin_only()
     async def check_engagement(
