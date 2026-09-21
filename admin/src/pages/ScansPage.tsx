@@ -75,7 +75,7 @@ export default function ScansPage() {
               <td className="mono">{run.period}</td>
               <td>{formatDate(run.started_at)}</td>
               <td>{duration(run)}</td>
-              <td>{run.source === 'member' ? <>Member scan<small className="block">{String(s.discord_username ?? '')}</small></> : <>{run.source === 'admin' ? 'Dashboard' : 'Discord'}<small className="block mono">{run.triggered_by}</small></>}</td>
+              <td>{run.source === 'member' ? <>Member scan<small className="block">{String(s.discord_username ?? '')}</small></> : <>{run.source === 'admin' ? 'Dashboard' : 'Discord'}<small className="block">{run.triggered_by_name || run.triggered_by}</small></>}</td>
               <td>{String(s.source_posts ?? '—')}</td>
               <td>{String(s.discovered ?? '—')}</td>
               <td>{changes.length ? `${changes.length} members` : run.status === 'complete' ? '0' : '—'}</td>

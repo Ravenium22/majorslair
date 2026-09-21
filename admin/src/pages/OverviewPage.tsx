@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { Activity, ArrowUpRight, Bot, Check, Clock3, LoaderCircle, Play, Radar, Sparkles, Trophy, Users } from 'lucide-react'
+import { Activity, AlertTriangle, ArrowUpRight, Bot, Check, Clock3, LoaderCircle, Play, Radar, RotateCcw, Sparkles, Trophy, Users } from 'lucide-react'
 import useSWR from 'swr'
 import { api, formatDate, formatScore, mutateApi } from '../api'
 import { Empty, PageHeader, Status, Toast, useEscape } from '../components'
-import type { LinkedUser, Overview, ScanEstimate, Session } from '../types'
+import type { LinkedUser, LowActivityReport, Overview, ScanEstimate, Session } from '../types'
 
 const WINDOWS = [['cycle', 'Whole cycle'], ['30d', 'Last 30 days'], ['60d', 'Last 60 days'], ['90d', 'Last 90 days'], ['180d', 'Last 6 months'], ['365d', 'Last 12 months']] as const
 
@@ -23,6 +23,10 @@ export default function OverviewPage({ session }: { session: Session }) {
   const [timelineTweets, setTimelineTweets] = useState(20)
   const timelinePages = Math.min(250, Math.max(1, Math.ceil(timelineTweets / 20)))
   const [starting, setStarting] = useState(false)
+  const [showReset, setShowReset] = useState(false)
+  const [confirmation, setConfirmation] = useState('')
+  const [resetting, setResetting] = useState(false)
+  const { data: lowActivity } = useSWR<LowActivityReport>('/api/low-activity', api)
   const [now, setNow] = useState(() => Date.now())
   const running = data?.last_scan?.status === 'running'
   const wasRunning = useRef(false)
@@ -74,6 +78,26 @@ export default function OverviewPage({ session }: { session: Session }) {
   }
 
   useEscape(Boolean(estimate) && !starting, () => setEstimate(undefined))
+  useEscape(showReset && !resetting, () => setShowReset(false))
+
+  const reset = async () => {
+    setResetting(true)
+    setNotice({ text: 'Freezing the standings and starting a new cycle…', kind: 'loading' })
+    try {
+      const result = await mutateApi<{ snapshots: number }>('/api/reset', session.csrf_token, 'POST', { confirmation })
+      setNotice({ text: `New cycle started. ${result.snapshots} member standings frozen; open Scan reports to see them.`, kind: 'success' })
+      setShowReset(false)
+      setConfirmation('')
+      await mutate()
+    } catch (error) { setNotice({ text: error instanceof Error ? error.message : 'Reset failed', kind: 'error' }) }
+    finally { setResetting(false) }
+  }
+
+  const cycleStarted = data?.cycle_started_at
+  const cycleDays = cycleStarted ? Math.max(0, Math.floor((Date.now() - new Date(cycleStarted).getTime()) / 86400000)) : null
+  const lastScan = data?.last_scan
+  const scanned = lastScan?.status === 'complete'
+  const scannedThisCycle = scanned && (!cycleStarted || new Date(lastScan.started_at) >= new Date(cycleStarted))
   const verifyCount = estimate ? estimate.linked_members - (skipProtected ? estimate.protected_linked : 0) : 0
   const verifyCredits = verifyX ? verifyCount * (estimate?.verification_credits_per_account ?? 10) : 0
   const scanEstimate = estimate && !estimate.estimate.error ? estimate.estimate : undefined
@@ -107,6 +131,29 @@ export default function OverviewPage({ session }: { session: Session }) {
             <small>{detail}</small>
           </article>
         ))}
+      </section>
+      <section className="panel cycle-panel">
+        <div>
+          <h2>This cycle</h2>
+          <dl className="cycle-facts">
+            <dt>Running since</dt>
+            <dd>{cycleStarted ? formatDate(cycleStarted) : 'the beginning'}<small>{cycleDays === null ? 'no reset yet' : `${cycleDays} days`}</small></dd>
+            <dt>Points awarded so far</dt>
+            <dd>{formatScore(data?.total_score ?? 0)}<small>across {data?.linked_members ?? 0} members with an X account</small></dd>
+            <dt>Last scan</dt>
+            <dd>{lastScan ? formatDate(lastScan.started_at) : 'never'}<small>{lastScan ? `${lastScan.period} window · ${String(lastScan.summary?.discovered ?? 0)} actions matched` : 'run one below'}</small></dd>
+          </dl>
+        </div>
+        <div>
+          <h2 className="sub-heading">The monthly round</h2>
+          <ol className="cycle-steps">
+            <li className={scannedThisCycle ? 'done' : ''}>Scan the window {scannedThisCycle && <small>done {formatDate(lastScan?.started_at)}</small>}</li>
+            <li className={scannedThisCycle ? 'done' : ''}>Check what moved <a href="#scans">Scan reports</a></li>
+            <li>Review who is inactive {lowActivity && <small>{lowActivity.items.length} on the list</small>}<a href="#low-activity">Low-activity report</a></li>
+            <li>Reward the top <a href="#members">Give role</a></li>
+            <li>Start the next cycle {cycleDays !== null && cycleDays >= 28 && <small>due</small>}<button className="link-button" onClick={() => setShowReset(true)}>Reset the leaderboard</button></li>
+          </ol>
+        </div>
       </section>
       <section className="overview-grid">
         <article className="panel leaderboard-panel">
@@ -152,6 +199,18 @@ export default function OverviewPage({ session }: { session: Session }) {
         <label className="check-row"><input type="checkbox" checked={readTimelines} onChange={(e) => setReadTimelines(e.target.checked)} disabled={starting} /> Deep check: also read every member's own timeline to catch replies X hides everywhere else ({timelineMembers} members). Off again next time.</label>
         {readTimelines && <div className="check-row nested depth-row"><span>Latest tweets per member:</span><div className="segmented">{[20, 100, 300, 500, 1000].map((n) => <button type="button" key={n} className={timelineTweets === n ? 'active' : ''} onClick={() => setTimelineTweets(n)} disabled={starting}>{n.toLocaleString()}</button>)}</div><label className="depth-custom">custom<input type="number" min={20} max={5000} step={20} value={timelineTweets} onChange={(e) => setTimelineTweets(Math.min(5000, Math.max(20, Number(e.target.value) || 20)))} disabled={starting} /></label><span className="muted">≈ {timelineCredits.toLocaleString()} credits ({usd(timelineCredits)}) at most, less when it reaches the window start first</span></div>}
         <div className="modal-actions"><button type="button" className="button ghost" onClick={() => setEstimate(undefined)} disabled={starting}>Cancel</button><button className="button primary" onClick={scan} disabled={starting}><Play size={16} />{starting ? 'Starting…' : 'Start scan'}</button></div>
+      </div></div>}
+      {showReset && <div className="modal-backdrop" onMouseDown={() => { if (!resetting) setShowReset(false) }}><div className="modal" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="modal-icon danger-icon"><AlertTriangle /></div><h2>Start a new cycle?</h2>
+        <p>This freezes where everyone stands right now and sets every score back to zero. Nothing is deleted: the frozen table stays under Scan reports forever, and so does every scan report.</p>
+        <dl className="cycle-facts freeze-summary">
+          <dt>About to be frozen</dt>
+          <dd>{data?.linked_members ?? 0} members · {formatScore(data?.total_score ?? 0)} points<small>{data?.leaderboard?.length ? `led by ${data.leaderboard.slice(0, 3).map((u) => `${u.discord_username} (${formatScore(u.score)})`).join(', ')}` : 'no standings yet'}</small></dd>
+          <dt>Cycle being closed</dt>
+          <dd className="mono">{data?.cycle_id || '—'}<small>{cycleStarted ? `started ${formatDate(cycleStarted)}` : 'the first cycle'}</small></dd>
+        </dl>
+        <label>Type RESET LEADERBOARD to confirm<input autoFocus value={confirmation} onChange={(e) => setConfirmation(e.target.value)} placeholder="RESET LEADERBOARD" disabled={resetting} /></label>
+        <div className="modal-actions"><button className="button ghost" onClick={() => setShowReset(false)} disabled={resetting}>Cancel</button><button className="button danger" disabled={confirmation !== 'RESET LEADERBOARD' || resetting} onClick={reset}><RotateCcw size={16} /> {resetting ? 'Freezing…' : 'Freeze and start a new cycle'}</button></div>
       </div></div>}
       <section className="panel scan-history">
         <div className="panel-head"><div><p className="eyebrow">System activity</p><h2>Recent scan runs</h2></div><Bot size={21} /></div>

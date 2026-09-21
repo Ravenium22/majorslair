@@ -272,3 +272,22 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .scan-progress { margin-top: 14px; padding: 12px 14px; border: 1px solid #4c4029; background: rgb(231 168 66 / 8%); }
 .scan-progress p { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--text); font-size: 13px; }
 .scan-progress small { display: block; margin-top: 6px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+/* The scoring reason is the product's promise; it was the dimmest text on the page. */
+.decision small { color: var(--muted); font-size: 12px; line-height: 1.45; }
+.config-group label small, .field-grid label small { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.metric small, .estimate-grid dd small, .report-grid dd small { color: var(--muted); }
+.cycle-panel { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(320px, 2fr); gap: 24px; align-items: start; margin-bottom: 20px; padding: 20px 22px; }
+.cycle-facts dt { color: var(--muted); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
+.cycle-facts dd { margin: 4px 0 14px; font-size: 15px; font-weight: 650; }
+.cycle-facts dd small { display: block; color: var(--muted); font-size: 11px; font-weight: 400; margin-top: 2px; }
+.cycle-steps { list-style: none; margin: 0; padding: 0; counter-reset: step; }
+.cycle-steps li { position: relative; display: flex; align-items: baseline; gap: 10px; padding: 9px 0 9px 30px; border-bottom: 1px solid var(--line-soft); font-size: 13px; }
+.cycle-steps li:last-child { border-bottom: 0; }
+.cycle-steps li::before { counter-increment: step; content: counter(step); position: absolute; left: 0; top: 9px; width: 20px; height: 20px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 50%; color: var(--muted); font: 10px "Cascadia Mono", monospace; }
+.cycle-steps li.done::before { border-color: var(--green); color: var(--green); }
+.cycle-steps li a { margin-left: auto; font-size: 12px; }
+.cycle-steps li small { color: var(--muted); font-size: 11px; }
+@media (max-width: 900px) { .cycle-panel { grid-template-columns: 1fr; } }
+.drawer-tools { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line-soft); }
+.freeze-summary { margin: 16px 0 0; padding: 14px 16px; border: 1px solid var(--line-soft); background: #0c0f0f; }
+.freeze-summary dd:last-child { margin-bottom: 0; }

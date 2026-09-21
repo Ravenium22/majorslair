@@ -65,7 +65,7 @@ export default function MembersPage({ session }: { session: Session }) {
   const memberDepth = Math.min(250, Math.max(1, Math.ceil(memberDepthTweets / 20)))
   const [memberScanning, setMemberScanning] = useState(false)
   const [memberScan, setMemberScan] = useState<MemberScanResult>()
-  const [editing, setEditing] = useState(false)
+  const [tool, setTool] = useState<'none' | 'edit' | 'points' | 'scan'>('none')
   const [saving, setSaving] = useState(false)
   const { data: history, mutate: mutateHistory } = useSWR<Paginated<Action>>(selected ? `/api/actions?discord_user_id=${selected.discord_user_id}&page_size=100` : null, api)
   const { data: adjustments, mutate: mutateAdjustments } = useSWR<Adjustment[]>(selected ? `/api/users/${selected.discord_user_id}/adjustments` : null, api)
@@ -195,7 +195,7 @@ export default function MembersPage({ session }: { session: Session }) {
   const withHandles = importRows.filter((row) => row.twitter_handle).length
   const withSpecial = importRows.filter((row) => row.special_role).length
 
-  const openMember = (user: LinkedUser) => { setSelected(user); setEditing(false); setMemberScan(undefined) }
+  const openMember = (user: LinkedUser) => { setSelected(user); setTool('none'); setMemberScan(undefined) }
 
   const roleFilters = () => ({
     search,
@@ -272,7 +272,7 @@ export default function MembersPage({ session }: { session: Session }) {
     } catch (error) { setNotice({ text: error instanceof Error ? error.message : 'Member scan failed', kind: 'error' }) }
     finally { setMemberScanning(false) }
   }
-  const closeMember = () => { if (saving) return; setSelected(undefined); setEditing(false) }
+  const closeMember = () => { if (saving) return; setSelected(undefined); setTool('none') }
 
   const saveEdit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -295,16 +295,16 @@ export default function MembersPage({ session }: { session: Session }) {
         updated = fresh.items[0] ?? updated
       }
       setSelected(updated)
-      setEditing(false)
+      setTool('none')
       setNotice({ text: `${updated.discord_username} updated.`, kind: 'success' })
       await Promise.all([mutate(), mutateHistory()])
     } catch (error) { setNotice({ text: error instanceof Error ? error.message : 'Update failed', kind: 'error' }) }
     finally { setSaving(false) }
   }
 
-  const anyModal = Boolean(showLink || showImport || showRoles || selected || syncResult || verifyResult || verifyPlan)
+  const anyModal = Boolean(confirmDeactivate || showLink || showImport || showRoles || selected || syncResult || verifyResult || verifyPlan)
   const anyBusy = importing || saving || roleBusy || verifying || memberScanning || syncing || adjusting
-  useEscape(anyModal && !anyBusy, () => { setShowLink(false); setShowImport(false); setShowRoles(false); setSelected(undefined); setEditing(false); setSyncResult(undefined); setVerifyResult(undefined); setVerifyPlan(undefined) })
+  useEscape(anyModal && !anyBusy, () => { setShowLink(false); setShowImport(false); setShowRoles(false); setSelected(undefined); setTool('none'); setSyncResult(undefined); setVerifyResult(undefined); setVerifyPlan(undefined) })
 
   return <div className="page">
     <PageHeader eyebrow="Community registry" title="Linked members" copy="Everyone in the community, with or without an X account. Protected members never appear in the low-activity report." actions={<button className="button primary" onClick={() => setShowLink(true)}><Plus size={17} /> Link member</button>} toolbar={<>
@@ -339,7 +339,7 @@ export default function MembersPage({ session }: { session: Session }) {
           <td>{user.discord_joined_at ? <span className="protected-cell">{formatDate(user.discord_joined_at)}<small>{daysAgo(user.discord_joined_at)} days ago</small></span> : <span className="muted" title="Run Sync from Discord to fill join dates">—</span>}</td>
           <td><span className={`status ${user.active ? 'complete' : 'failed'}`}><i />{user.active ? 'Active' : 'Inactive'}</span></td>
           <td className="row-actions" onClick={(e) => e.stopPropagation()}>
-            <button className="icon-button" title="Open member: history and edit" onClick={() => { openMember(user); setEditing(true) }}><Pencil size={17} /></button>
+            <button className="icon-button" title="Open member: history and edit" onClick={() => { openMember(user); setTool('edit') }}><Pencil size={17} /></button>
             <button className="icon-button" title={user.special_role ? 'Remove protection' : 'Protect from low-activity report'} onClick={() => toggleProtected(user)}>{user.special_role ? <ShieldOff size={18} /> : <Shield size={18} />}</button>
             <button className="icon-button" title={user.active ? 'Deactivate' : 'Reactivate'} onClick={() => toggleActive(user)}>{user.active ? <UserRoundX size={18} /> : <UserRoundCheck size={18} />}</button>
           </td>
@@ -363,14 +363,19 @@ export default function MembersPage({ session }: { session: Session }) {
         {selected.discord_joined_at && <span className="muted">joined Discord {formatDate(selected.discord_joined_at)} ({daysAgo(selected.discord_joined_at)} days ago)</span>}
         {selected.handle_history && <span className="muted">previous X: {selected.handle_history.split('|').map((h) => `@${h}`).join(', ')}</span>}
       </div>
-      {!editing ? <div className="modal-actions left"><button className="button" onClick={() => setEditing(true)}><Pencil size={15} /> Edit member</button></div> : <form className="edit-grid" onSubmit={saveEdit}>
+      <div className="drawer-tools">
+        <button type="button" className={`button ${tool === 'edit' ? 'primary' : ''}`} onClick={() => setTool(tool === 'edit' ? 'none' : 'edit')}><Pencil size={15} /> Edit member</button>
+        <button type="button" className={`button ${tool === 'points' ? 'primary' : ''}`} onClick={() => setTool(tool === 'points' ? 'none' : 'points')}><ArrowLeftRight size={15} /> Points</button>
+        {selected.twitter_user_id && <button type="button" className={`button ${tool === 'scan' ? 'primary' : ''}`} onClick={() => setTool(tool === 'scan' ? 'none' : 'scan')}><BadgeCheck size={15} /> Scan this member</button>}
+      </div>
+      {tool === 'edit' && <form className="edit-grid" onSubmit={saveEdit}>
         <label>Discord handle<input name="discord_username" defaultValue={selected.discord_username} required maxLength={120} /></label>
         <label>X handle<input name="twitter_handle" defaultValue={selected.twitter_handle} placeholder="handle (verified on save)" /></label>
         <label className="check-row"><input type="checkbox" name="special_role" defaultChecked={selected.special_role} /> Protected (never in the low-activity report)</label>
         <label>Special role names<input name="special_role_names" defaultValue={selected.special_role_names} placeholder="Builder, Friend" /></label>
-        <div className="modal-actions"><button type="button" className="button ghost" onClick={() => setEditing(false)} disabled={saving}>Cancel</button><button className="button primary" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button></div>
+        <div className="modal-actions"><button type="button" className="button ghost" onClick={() => setTool('none')} disabled={saving}>Cancel</button><button className="button primary" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button></div>
       </form>}
-      <div className="member-scan adjust-panel">
+      {tool === 'points' && <div className="member-scan adjust-panel">
         <div><h3 className="sub-heading"><ArrowLeftRight size={13} /> Points: add, remove or transfer</h3><p className="muted small">Manual adjustments are kept separately from scanned actions, so scans and rescoring never undo them. Every one is logged in the Audit trail with who did it and why.</p></div>
         <form className="adjust-form" onSubmit={submitAdjust}>
           <div className="segmented adjust-mode"><button type="button" className={adjustMode === 'add' ? 'active' : ''} onClick={() => setAdjustMode('add')}>Add / remove</button><button type="button" className={adjustMode === 'transfer' ? 'active' : ''} onClick={() => setAdjustMode('transfer')}>Transfer to someone</button></div>
@@ -382,8 +387,8 @@ export default function MembersPage({ session }: { session: Session }) {
           <div className="modal-actions left"><button className="button primary" disabled={adjusting}>{adjusting ? 'Saving…' : adjustMode === 'transfer' ? 'Transfer points' : adjustMode === 'add' ? 'Apply points' : 'Apply'}</button></div>
         </form>
         {adjustments && adjustments.length > 0 && <div className="table-wrap"><table><thead><tr><th>When</th><th>Points</th><th>Reason</th><th>By</th><th>Counterpart</th></tr></thead><tbody>{adjustments.map((a) => <tr key={a.adjustment_id}><td>{formatDate(a.created_at)}</td><td className={`score ${a.points >= 0 ? 'gain' : 'loss'}`}>{a.points >= 0 ? '+' : ''}{formatScore(a.points)}</td><td className="muted">{a.reason || '—'}</td><td className="mono">{a.actor_discord_id}</td><td className="mono">{a.counterpart_discord_id || '—'}</td></tr>)}</tbody></table></div>}
-      </div>
-      {selected.twitter_user_id && <div className="member-scan">
+      </div>}
+      {tool === 'scan' && selected.twitter_user_id && <div className="member-scan">
         <div><h3 className="sub-heading">Scan this member only</h3><p className="muted small">Reads their own timeline (replies included) back to the start of the period or until the depth is reached, whichever comes first. Costs up to {(memberDepth * 20 * 15).toLocaleString()} credits (${((memberDepth * 20 * 15) / 100000).toFixed(2)}), usually far less because it stops at the period start. Catches replies X hides everywhere else. Pick a bigger depth for long periods on active posters.</p></div>
         <div className="member-scan-controls"><div className="depth-picker"><span className="muted small">Latest tweets to read:</span><div className="segmented">{[100, 300, 500, 1000, 2000].map((n) => <button type="button" key={n} className={memberDepthTweets === n ? 'active' : ''} onClick={() => setMemberDepthTweets(n)} disabled={memberScanning}>{n.toLocaleString()}</button>)}</div><label className="depth-custom">custom<input type="number" min={20} max={5000} step={20} value={memberDepthTweets} onChange={(e) => setMemberDepthTweets(Math.min(5000, Math.max(20, Number(e.target.value) || 20)))} disabled={memberScanning} /></label></div><select value={memberPeriod} onChange={(e) => setMemberPeriod(e.target.value)} disabled={memberScanning}><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option><option value="60d">Last 60 days</option><option value="90d">Last 90 days</option><option value="180d">Last 6 months</option><option value="365d">Last 12 months</option></select><button className="button primary" onClick={runMemberScan} disabled={memberScanning}>{memberScanning ? 'Scanning…' : 'Scan this member'}</button></div>
         {memberScan && <p className="import-summary">Read {memberScan.tweets_read} tweets{memberScan.timeline_ended_early ? ` (X's timeline feed stopped at ${memberScan.timeline_ended_at ? formatDate(memberScan.timeline_ended_at) : 'an earlier date'} after ${memberScan.timeline_read ?? 0}; search found ${memberScan.search_filled ?? 0} more back to the period start)` : ''} · matched {memberScan.matched} ({memberScan.replies} replies, {memberScan.quotes} quotes, {memberScan.mentions} mentions) · {memberScan.new_actions} new · points {formatScore(memberScan.points_before)} → <strong>{formatScore(memberScan.points_after)}</strong>{memberScan.complete ? '' : ' · depth cap reached, older tweets skipped'} · ≈ {(Math.max(memberScan.items_returned, memberScan.api_requests) * 15).toLocaleString()} credits · saved under <a href="#scans">Scan reports</a></p>}

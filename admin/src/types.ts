@@ -27,6 +27,7 @@ export type Scan = {
   period: string
   status: 'running' | 'complete' | 'failed'
   triggered_by: string
+  triggered_by_name?: string
   source: string
   started_at: string
   completed_at: string
@@ -39,6 +40,7 @@ export type ScanRun = {
   period: string
   status: 'running' | 'complete' | 'failed'
   triggered_by: string
+  triggered_by_name?: string
   source: string
   started_at: string
   completed_at: string
@@ -58,6 +60,7 @@ export type Overview = {
   active_actions: number
   tracked_posts: number
   cycle_id: string
+  cycle_started_at: string
   bot_connected: boolean
   last_scan: Scan | null
   leaderboard: LinkedUser[]

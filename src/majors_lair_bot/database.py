@@ -943,16 +943,19 @@ class DatabaseRepository:
             linked_count, total_score, action_count, tracked_count = await self._overview_counts(
                 session, cycle.value if cycle else ""
             )
+            started = await session.get(ConfigRow, "cycle_started_at")
             last_scan = await session.scalar(
                 select(ScanRunRow).order_by(ScanRunRow.started_at.desc()).limit(1)
             )
+            names = await self._member_names(session, {last_scan.triggered_by}) if last_scan else {}
         return {
             "linked_members": linked_count,
             "total_score": round(float(total_score or 0), 2),
             "active_actions": action_count,
             "tracked_posts": tracked_count,
             "cycle_id": cycle.value if cycle else "",
-            "last_scan": self._scan_dict(last_scan) if last_scan else None,
+            "cycle_started_at": started.value if started else "",
+            "last_scan": self._scan_dict(last_scan, names) if last_scan else None,
         }
 
     @staticmethod
@@ -1199,12 +1202,13 @@ class DatabaseRepository:
         }
 
     @staticmethod
-    def _scan_dict(row: ScanRunRow) -> dict[str, Any]:
+    def _scan_dict(row: ScanRunRow, names: dict[str, str] | None = None) -> dict[str, Any]:
         return {
             "scan_id": row.scan_id,
             "period": row.period,
             "status": row.status,
             "triggered_by": row.triggered_by,
+            "triggered_by_name": (names or {}).get(row.triggered_by, ""),
             "source": row.source,
             "started_at": isoformat(row.started_at),
             "completed_at": isoformat(row.completed_at) if row.completed_at else "",
@@ -1316,8 +1320,9 @@ class DatabaseRepository:
         async with self.sessions() as session:
             total = int(await session.scalar(count_statement) or 0)
             rows = (await session.scalars(statement)).all()
+            names = await self._member_names(session, {row.triggered_by for row in rows})
         return {
-            "items": [self._scan_dict(row) for row in rows],
+            "items": [self._scan_dict(row, names) for row in rows],
             "page": page,
             "page_size": page_size,
             "total": total,
@@ -1330,7 +1335,23 @@ class DatabaseRepository:
                     select(ScanRunRow).order_by(ScanRunRow.started_at.desc()).limit(limit)
                 )
             ).all()
-        return [self._scan_dict(row) for row in rows]
+            names = await self._member_names(session, {row.triggered_by for row in rows})
+        return [self._scan_dict(row, names) for row in rows]
+
+    @staticmethod
+    async def _member_names(session: AsyncSession, ids: set[str]) -> dict[str, str]:
+        """Discord handles for the given ids, so reports can name people instead of numbers."""
+        wanted = {value for value in ids if value}
+        if not wanted:
+            return {}
+        rows = (
+            await session.execute(
+                select(UserRow.discord_user_id, UserRow.discord_username).where(
+                    UserRow.discord_user_id.in_(wanted)
+                )
+            )
+        ).all()
+        return {user_id: username for user_id, username in rows}
 
     @staticmethod
     def hash_session_token(token: str) -> str:

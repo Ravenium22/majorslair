@@ -50,18 +50,24 @@ DEFAULT_CONFIG: dict[str, str] = {
 
 
 CONFIG_DESCRIPTIONS: dict[str, str] = {
-    "current_cycle_id": "Internal leaderboard cycle identifier; changed by reset.",
-    "cycle_started_at": "UTC timestamp set by reset; scans never award older activity.",
-    "primary_handle": "Primary X account, without @.",
-    "secondary_handle": "Secondary X account, without @.",
-    "default_check_period": "Default period for /check-engagement.",
-    "default_refresh_period": "Period used by /refresh-engagement.",
+    "current_cycle_id": "Name of the leaderboard round in progress. A reset starts a new one.",
+    "cycle_started_at": (
+        "When the current round began. No scan ever pays for activity older than this, "
+        "whatever window you pick."
+    ),
+    "primary_handle": "The main X account to watch, without the @. Engagement here pays most.",
+    "secondary_handle": "The second X account to watch, without the @.",
+    "default_check_period": ("The window /check-engagement uses in Discord when nobody picks one."),
+    "default_refresh_period": "The window /refresh-engagement uses in Discord.",
     "max_source_pages": (
         "Max pages (20 posts each) fetched per tracked account. Paging stops at the "
         "window start, so a high cap costs nothing on short windows but is required for "
         "long ones."
     ),
-    "max_action_pages_per_post": "Safety cap per replies/quotes/retweeters endpoint.",
+    "max_action_pages_per_post": (
+        "Pages (20 items each) of replies, quotes and retweeters read per tracked post. Only "
+        "posts with hundreds of replies ever reach this."
+    ),
     "max_mention_pages": (
         "Pages (20 mentions each) of each tracked account's mention feed read per scan. Busy "
         "accounts get 200+ mentions a week, so long windows need more pages; the scan "
@@ -80,7 +86,10 @@ CONFIG_DESCRIPTIONS: dict[str, str] = {
         "Comma-separated Discord role names (for example Active Supporter, Builder). "
         "Sync from Discord marks members holding any of them as protected."
     ),
-    "low_activity_threshold": "Score at or below this appears in the low-activity report.",
+    "low_activity_threshold": (
+        "Members with this many points or fewer appear on the low-activity report. Protected "
+        "members and recent joiners are left out of it whatever their score."
+    ),
     "newcomer_grace_days": (
         "Members who joined the Discord server fewer than this many days ago never appear in "
         "the low-activity report. Join dates come from Sync from Discord. 0 = no grace."
@@ -89,11 +98,62 @@ CONFIG_DESCRIPTIONS: dict[str, str] = {
         "true = scans neither score nor X-verify special-role members by default; "
         "each scan can still override this."
     ),
-    "blacklist": "Comma-separated low-effort words/phrases.",
-    "reference_keywords": "Comma-separated research/on-chain value signals.",
-    "minimum_words": "Fewer normalized words is treated as low effort.",
-    "low_effort_multiplier": "Multiplier applied to non-retweet low-effort text.",
-    "daily_scored_action_cap": "Per-user daily cap; later content remains logged at 0 points.",
+    "blacklist": (
+        "Comma-separated words and phrases that earn nothing on their own. A reply made only "
+        "of these (gm, lfg, fire) scores 0."
+    ),
+    "reference_keywords": (
+        "Comma-separated words that earn the research bonus above, the vocabulary of somebody "
+        "who actually read the thing."
+    ),
+    "reply_primary": (
+        "Points for replying to a post by the primary account. Replies are the most common "
+        "action, so this weight sets the scale for everything else."
+    ),
+    "quote_primary": (
+        "Points for quote-tweeting a post by the primary account. Usually the highest weight: "
+        "a quote puts the post in front of the member's own followers."
+    ),
+    "retweet_primary": (
+        "Points for retweeting a post by the primary account. Lower than a reply because it "
+        "costs one tap and adds no words."
+    ),
+    "mention_primary": (
+        "Points for a standalone post that @-mentions the primary account without replying to "
+        "or quoting it."
+    ),
+    "reply_secondary": "Points for replying to a post by the secondary account.",
+    "quote_secondary": "Points for quote-tweeting a post by the secondary account.",
+    "retweet_secondary": "Points for retweeting a post by the secondary account.",
+    "mention_secondary": "Points for a standalone post that @-mentions the secondary account.",
+    "word_bonus_8": "Extra points when the text runs to 8 words or more but under 20.",
+    "word_bonus_20": (
+        "Extra points when the text runs to 20 words or more. Replaces the 8-word bonus "
+        "rather than adding to it."
+    ),
+    "question_bonus": "Extra points when the text contains a question mark.",
+    "reference_bonus": (
+        "Extra points when the text uses one of the reference keywords below, the signal that "
+        "someone actually looked into the subject."
+    ),
+    "media_bonus": "Extra points when the reply or quote carries an image or video.",
+    "link_bonus": "Extra points when the text includes a link.",
+    "quality_bonus_cap": (
+        "Ceiling on all bonuses added together, so one long post with a link, an image and a "
+        "question cannot run away with the leaderboard."
+    ),
+    "minimum_words": (
+        "Replies and quotes shorter than this many words count as low effort and are "
+        "multiplied down by the setting below."
+    ),
+    "low_effort_multiplier": (
+        "What a short reply or quote is worth, as a fraction of its normal points. 0 means "
+        "nothing, 1 means treat it like any other reply."
+    ),
+    "daily_scored_action_cap": (
+        "How many actions one member can be paid for in a single day. Anything beyond it is "
+        "still logged, at 0 points, so spamming does not pay."
+    ),
 }
 
 
