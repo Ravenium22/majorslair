@@ -186,8 +186,8 @@ export type Snapshot = {
   members: { rank: number; discord_user_id: string; discord_username: string; twitter_handle: string; score: number }[]
 }
 
-export type DiscordRole = { id: string; name: string; color: number; position: number; managed: boolean; assignable: boolean }
-export type RoleBulkResult = { matched: number; members?: LinkedUser[]; changed?: { discord_user_id: string; discord_username: string }[]; failed?: { discord_user_id: string; discord_username: string; error: string }[] }
+export type DiscordRole = { id: string; name: string; color: number; position: number; managed: boolean; assignable: boolean; booster: boolean }
+export type RoleBulkResult = { matched: number; members?: LinkedUser[]; changed?: { discord_user_id: string; discord_username: string }[]; failed?: { discord_user_id: string; discord_username: string; error: string }[]; skipped?: { discord_user_id: string; discord_username: string; roles: string }[] }
 
 export type Adjustment = {
   adjustment_id: string
@@ -207,6 +207,11 @@ export type MemberScanResult = {
   twitter_handle: string
   period: string
   tweets_read: number
+  timeline_read?: number
+  timeline_ended_at?: string
+  timeline_ended_early?: boolean
+  search_filled?: number
+  scan_id?: string
   complete: boolean
   matched: number
   new_actions: number
@@ -231,5 +236,6 @@ export type Diagnosis = {
   sweep?: { found: boolean; returned: number; complete: boolean }
   timeline?: { found: boolean; returned: number; enabled: boolean }
   mention_feed?: { target: string; found: boolean; returned: number; cap_pages: number }
+  author_search?: { found: boolean; returned: number }
 }
 

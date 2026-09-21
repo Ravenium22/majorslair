@@ -139,6 +139,7 @@ class MemberFilters(BaseModel):
     joined: str = "any"
     min_score: float | None = None
     max_score: float | None = None
+    threshold: float | None = None
 
 
 class RoleBulkRequest(BaseModel):
@@ -146,6 +147,8 @@ class RoleBulkRequest(BaseModel):
     action: str = Field(default="add", pattern=r"^(add|remove)$")
     filters: MemberFilters = Field(default_factory=MemberFilters)
     dry_run: bool = False
+    # Members who currently hold any of these roles are left alone (checked live).
+    exclude_role_ids: list[str] = Field(default_factory=list)
 
 
 class AdjustRequest(BaseModel):
@@ -447,12 +450,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         joined: str = "any",
         min_score: float | None = None,
         max_score: float | None = None,
+        threshold: float | None = None,
         page: int = 1,
         page_size: int = 50,
     ) -> dict[str, Any]:
         page, page_size = _page(page, page_size)
         config_values = await runtime.repository.get_config()
-        threshold = float(config_values["low_activity_threshold"]) if points == "low" else None
+        if points == "low":
+            threshold = (
+                threshold
+                if threshold is not None
+                else float(config_values["low_activity_threshold"])
+            )
+        else:
+            threshold = None
         grace = int(config_values.get("newcomer_grace_days", DEFAULT_CONFIG["newcomer_grace_days"]))
         return await runtime.repository.paginated_users(
             search=search,
@@ -473,9 +484,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     async def _members_matching(filters: MemberFilters) -> list[dict[str, Any]]:
         config_values = await runtime.repository.get_config()
-        threshold = (
-            float(config_values["low_activity_threshold"]) if filters.points == "low" else None
-        )
+        threshold = None
+        if filters.points == "low":
+            threshold = (
+                filters.threshold
+                if filters.threshold is not None
+                else float(config_values["low_activity_threshold"])
+            )
         grace = int(config_values.get("newcomer_grace_days", DEFAULT_CONFIG["newcomer_grace_days"]))
         page = await runtime.repository.paginated_users(
             search=filters.search,
@@ -530,6 +545,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "color": r.get("color", 0),
                 "position": int(r.get("position", 0)),
                 "managed": bool(r.get("managed")),
+                # Discord marks the Nitro booster role with a premium_subscriber tag.
+                "booster": "premium_subscriber" in (r.get("tags") or {}),
                 "assignable": manage_roles
                 and not r.get("managed")
                 and int(r.get("position", 0)) < bot_top
@@ -545,13 +562,58 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def bulk_role(payload: RoleBulkRequest, admin: MutatingAdmin) -> dict[str, Any]:
         """Add or remove one Discord role for every member matching the filters."""
         members = await _members_matching(payload.filters)
-        if payload.dry_run:
-            return {"matched": len(members), "members": members[:500]}
         headers = {"Authorization": f"Bot {runtime.settings.discord_token}"}
         guild_id = runtime.settings.discord_guild_id
+        excluded_ids = {str(r) for r in payload.exclude_role_ids if str(r).isdigit()}
+        skipped: list[dict[str, str]] = []
+        semaphore = asyncio.Semaphore(4)
+
+        if excluded_ids:
+            # Check each member's roles right now, so a booster who got the role this
+            # morning is still left alone.
+            names_response = await runtime.http.get(
+                f"{DISCORD_API}/guilds/{guild_id}/roles", headers=headers
+            )
+            role_names = (
+                {str(r["id"]): str(r.get("name", "")) for r in names_response.json()}
+                if names_response.status_code < 400
+                else {}
+            )
+
+            async def current_roles(member: dict[str, Any]) -> set[str]:
+                async with semaphore:
+                    response = await runtime.http.get(
+                        f"{DISCORD_API}/guilds/{guild_id}/members/{member['discord_user_id']}",
+                        headers=headers,
+                    )
+                if response.status_code >= 400:
+                    return set()
+                return {str(r) for r in response.json().get("roles", [])}
+
+            role_sets = await asyncio.gather(*(current_roles(m) for m in members))
+            kept: list[dict[str, Any]] = []
+            for member, held in zip(members, role_sets, strict=True):
+                hit = held & excluded_ids
+                if hit:
+                    skipped.append(
+                        {
+                            "discord_user_id": member["discord_user_id"],
+                            "discord_username": member["discord_username"],
+                            "roles": ", ".join(sorted(role_names.get(r, r) for r in hit)),
+                        }
+                    )
+                else:
+                    kept.append(member)
+            members = kept
+
+        if payload.dry_run:
+            return {
+                "matched": len(members),
+                "members": members[:500],
+                "skipped": skipped,
+            }
         changed: list[dict[str, str]] = []
         failed: list[dict[str, str]] = []
-        semaphore = asyncio.Semaphore(4)
 
         async def apply(member: dict[str, Any]) -> None:
             url = (
@@ -602,12 +664,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "matched": len(members),
                 "changed": len(changed),
                 "failed": len(failed),
+                "skipped_by_role": len(skipped),
+                "exclude_role_ids": sorted(excluded_ids),
             },
         )
         return {
             "matched": len(members),
             "changed": changed,
             "failed": failed,
+            "skipped": skipped,
         }
 
     @app.get("/api/users/export")
@@ -621,10 +686,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         points: str = "any",
         sort: str = "score_desc",
         joined: str = "any",
+        threshold: float | None = None,
     ) -> Response:
         """The current member list, with the same filters as the page, as a CSV sheet."""
         config_values = await runtime.repository.get_config()
-        threshold = float(config_values["low_activity_threshold"]) if points == "low" else None
+        if points == "low":
+            threshold = (
+                threshold
+                if threshold is not None
+                else float(config_values["low_activity_threshold"])
+            )
+        else:
+            threshold = None
         grace = int(config_values.get("newcomer_grace_days", DEFAULT_CONFIG["newcomer_grace_days"]))
         page = await runtime.repository.paginated_users(
             search=search,

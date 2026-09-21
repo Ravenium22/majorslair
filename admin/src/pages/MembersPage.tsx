@@ -47,6 +47,7 @@ export default function MembersPage({ session }: { session: Session }) {
   const [segment, setSegment] = useState<(typeof SEGMENTS)[number]['id']>('everyone')
   const [protection, setProtection] = useState<(typeof PROTECTION)[number]['id']>('any')
   const [points, setPoints] = useState<(typeof POINTS)[number]['id']>('any')
+  const [lowThreshold, setLowThreshold] = useState('')
   const [joined, setJoined] = useState<(typeof JOINED)[number]['id']>('any')
   const [sort, setSort] = useState<(typeof SORTS)[number]['id']>('score_desc')
   const [page, setPage] = useState(1)
@@ -84,20 +85,22 @@ export default function MembersPage({ session }: { session: Session }) {
   const [rolePreview, setRolePreview] = useState<RoleBulkResult>()
   const [roleResult, setRoleResult] = useState<RoleBulkResult>()
   const [roleBusy, setRoleBusy] = useState(false)
+  const [excludeRoleIds, setExcludeRoleIds] = useState<string[]>([])
   const filterQuery = useMemo(() => new URLSearchParams({
     search,
     ...(filter !== 'all' ? { active: String(filter === 'active') } : {}),
     ...SEGMENTS.find((item) => item.id === segment)?.query,
     ...PROTECTION.find((item) => item.id === protection)?.query,
     ...(points !== 'any' ? { points } : {}),
+    ...(points === 'low' && lowThreshold !== '' ? { threshold: lowThreshold } : {}),
     ...(joined !== 'any' ? { joined } : {}),
     ...(sort !== 'score_desc' ? { sort } : {}),
-  }).toString(), [search, filter, segment, protection, points, joined, sort])
+  }).toString(), [search, filter, segment, protection, points, lowThreshold, joined, sort])
   const query = `${filterQuery}&page=${page}&page_size=25`
   const { data, mutate, isLoading } = useSWR<Paginated<LinkedUser>>(`/api/users?${query}`, api)
   const resetPage = <T,>(setter: (value: T) => void) => (value: T) => { setter(value); setPage(1) }
   const hasFilters = Boolean(search) || filter !== 'active' || segment !== 'everyone' || protection !== 'any' || points !== 'any' || joined !== 'any'
-  const clearFilters = () => { setSearch(''); setFilter('active'); setSegment('everyone'); setProtection('any'); setPoints('any'); setJoined('any'); setSort('score_desc'); setPage(1) }
+  const clearFilters = () => { setSearch(''); setFilter('active'); setSegment('everyone'); setProtection('any'); setPoints('any'); setLowThreshold(''); setJoined('any'); setSort('score_desc'); setPage(1) }
 
   const patch = async (user: LinkedUser, body: Record<string, unknown>, success: string) => {
     try {
@@ -197,6 +200,7 @@ export default function MembersPage({ session }: { session: Session }) {
     ...(segment === 'xissues' ? { x_ok: false } : {}),
     ...(protection !== 'any' ? { protected: protection === 'protected' } : {}),
     points,
+    threshold: points === 'low' && lowThreshold !== '' ? Number(lowThreshold) : null,
     joined,
     min_score: roleMin === '' ? null : Number(roleMin),
     max_score: roleMax === '' ? null : Number(roleMax),
@@ -206,12 +210,17 @@ export default function MembersPage({ session }: { session: Session }) {
     setShowRoles(true)
     setRoleResult(undefined)
     setRolePreview(undefined)
-    try { setRoles(await api('/api/discord/roles')) } catch (error) { setNotice({ text: error instanceof Error ? error.message : 'Could not load roles', kind: 'error' }) }
+    try {
+      const loaded = await api<{ roles: DiscordRole[]; bot_can_manage_roles: boolean }>('/api/discord/roles')
+      setRoles(loaded)
+      // Nitro boosters are protected from role changes by default; the admin can untick.
+      setExcludeRoleIds(loaded.roles.filter((r) => r.booster).map((r) => r.id))
+    } catch (error) { setNotice({ text: error instanceof Error ? error.message : 'Could not load roles', kind: 'error' }) }
   }
 
   const previewRoles = async () => {
     setRoleBusy(true)
-    try { setRolePreview(await mutateApi<RoleBulkResult>('/api/users/roles', session.csrf_token, 'POST', { role_id: roleId || '000000', action: roleAction, filters: roleFilters(), dry_run: true })) }
+    try { setRolePreview(await mutateApi<RoleBulkResult>('/api/users/roles', session.csrf_token, 'POST', { role_id: roleId || '000000', action: roleAction, filters: roleFilters(), dry_run: true, exclude_role_ids: excludeRoleIds })) }
     catch (error) { setNotice({ text: error instanceof Error ? error.message : 'Preview failed', kind: 'error' }) }
     finally { setRoleBusy(false) }
   }
@@ -220,7 +229,7 @@ export default function MembersPage({ session }: { session: Session }) {
     if (!roleId) { setNotice({ text: 'Pick a role first', kind: 'error' }); return }
     setRoleBusy(true)
     try {
-      const result = await mutateApi<RoleBulkResult>('/api/users/roles', session.csrf_token, 'POST', { role_id: roleId, action: roleAction, filters: roleFilters(), dry_run: false })
+      const result = await mutateApi<RoleBulkResult>('/api/users/roles', session.csrf_token, 'POST', { role_id: roleId, action: roleAction, filters: roleFilters(), dry_run: false, exclude_role_ids: excludeRoleIds })
       setRoleResult(result)
       setNotice({ text: `${roleAction === 'add' ? 'Gave' : 'Removed'} the role for ${result.changed?.length ?? 0} of ${result.matched} members${result.failed?.length ? `, ${result.failed.length} failed` : ''}.`, kind: result.failed?.length ? 'error' : 'success' })
     } catch (error) { setNotice({ text: error instanceof Error ? error.message : 'Role update failed', kind: 'error' }) }
@@ -310,7 +319,8 @@ export default function MembersPage({ session }: { session: Session }) {
       <div className="toolbar filters wrap">
         <div className="segmented">{SEGMENTS.map((item) => <button className={segment === item.id ? 'active' : ''} onClick={() => resetPage(setSegment)(item.id)} key={item.id}>{item.label}</button>)}</div>
         <div className="segmented">{PROTECTION.map((item) => <button className={protection === item.id ? 'active' : ''} onClick={() => resetPage(setProtection)(item.id)} key={item.id}>{item.label}</button>)}</div>
-        <div className="segmented">{POINTS.map((item) => <button className={points === item.id ? 'active' : ''} onClick={() => resetPage(setPoints)(item.id)} key={item.id} title={item.id === 'low' ? 'At or below the low-activity threshold from Scoring rules' : undefined}>{item.label}</button>)}</div>
+        <div className="segmented">{POINTS.map((item) => <button className={points === item.id ? 'active' : ''} onClick={() => resetPage(setPoints)(item.id)} key={item.id} title={item.id === 'low' ? 'At or below the low-activity threshold from Scoring rules, or the number you type next to it' : undefined}>{item.label}</button>)}</div>
+        {points === 'low' && <label className="threshold-box">≤<input type="number" min={0} step={1} inputMode="numeric" placeholder="pts" value={lowThreshold} onChange={(e) => { const v = e.target.value.replace(/[^0-9]/g, ''); setLowThreshold(v); setPage(1) }} title="Points at or below this count as low activity for this view. Empty = the threshold from Scoring rules." /><span className="muted small">pts{lowThreshold === '' ? ' (setting)' : ''}</span></label>}
         <div className="segmented">{JOINED.map((item) => <button className={joined === item.id ? 'active' : ''} onClick={() => resetPage(setJoined)(item.id)} key={item.id} title={item.id === 'new' ? 'Joined Discord within the grace period (newcomer_grace_days in Scoring rules); never in the low-activity report' : item.id === 'established' ? 'Joined before the grace period, or join date unknown' : undefined}>{item.label}</button>)}</div>
         <div className="segmented">{['active', 'inactive', 'all'].map((value) => <button className={filter === value ? 'active' : ''} onClick={() => resetPage(setFilter)(value)} key={value}>{value}</button>)}</div>
         <span className="filter-count">{data ? `${data.total.toLocaleString()} member${data.total === 1 ? '' : 's'}` : ''}{hasFilters && <button className="link-button" onClick={clearFilters}>Clear filters</button>}</span>
@@ -372,7 +382,7 @@ export default function MembersPage({ session }: { session: Session }) {
       {selected.twitter_user_id && <div className="member-scan">
         <div><h3 className="sub-heading">Scan this member only</h3><p className="muted small">Reads their own timeline (replies included) back to the start of the period or until the depth is reached, whichever comes first. Costs up to {(memberDepth * 20 * 15).toLocaleString()} credits (${((memberDepth * 20 * 15) / 100000).toFixed(2)}), usually far less because it stops at the period start. Catches replies X hides everywhere else. Pick a bigger depth for long periods on active posters.</p></div>
         <div className="member-scan-controls"><div className="depth-picker"><span className="muted small">Latest tweets to read:</span><div className="segmented">{[100, 300, 500, 1000, 2000].map((n) => <button type="button" key={n} className={memberDepthTweets === n ? 'active' : ''} onClick={() => setMemberDepthTweets(n)} disabled={memberScanning}>{n.toLocaleString()}</button>)}</div><label className="depth-custom">custom<input type="number" min={20} max={5000} step={20} value={memberDepthTweets} onChange={(e) => setMemberDepthTweets(Math.min(5000, Math.max(20, Number(e.target.value) || 20)))} disabled={memberScanning} /></label></div><select value={memberPeriod} onChange={(e) => setMemberPeriod(e.target.value)} disabled={memberScanning}><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option><option value="60d">Last 60 days</option><option value="90d">Last 90 days</option><option value="180d">Last 6 months</option><option value="365d">Last 12 months</option></select><button className="button primary" onClick={runMemberScan} disabled={memberScanning}>{memberScanning ? 'Scanning…' : 'Scan this member'}</button></div>
-        {memberScan && <p className="import-summary">Read {memberScan.tweets_read} tweets · matched {memberScan.matched} ({memberScan.replies} replies, {memberScan.quotes} quotes, {memberScan.mentions} mentions) · {memberScan.new_actions} new · points {formatScore(memberScan.points_before)} → <strong>{formatScore(memberScan.points_after)}</strong>{memberScan.complete ? '' : ' · timeline page cap reached, older tweets skipped'} · ≈ {(Math.max(memberScan.items_returned, memberScan.api_requests) * 15).toLocaleString()} credits</p>}
+        {memberScan && <p className="import-summary">Read {memberScan.tweets_read} tweets{memberScan.timeline_ended_early ? ` (X's timeline feed stopped at ${memberScan.timeline_ended_at ? formatDate(memberScan.timeline_ended_at) : 'an earlier date'} after ${memberScan.timeline_read ?? 0}; search found ${memberScan.search_filled ?? 0} more back to the period start)` : ''} · matched {memberScan.matched} ({memberScan.replies} replies, {memberScan.quotes} quotes, {memberScan.mentions} mentions) · {memberScan.new_actions} new · points {formatScore(memberScan.points_before)} → <strong>{formatScore(memberScan.points_after)}</strong>{memberScan.complete ? '' : ' · depth cap reached, older tweets skipped'} · ≈ {(Math.max(memberScan.items_returned, memberScan.api_requests) * 15).toLocaleString()} credits · saved under <a href="#scans">Scan reports</a></p>}
       </div>}
       <h3 className="sub-heading">Engagement this cycle · {history ? `${history.total} action${history.total === 1 ? '' : 's'}${history.total > history.items.length ? ` · showing the latest ${history.items.length}` : ''}` : '…'}</h3>
       <p className="muted small">Every reply, quote, retweet and mention the scans matched to this member, with the points decision. Zero-point rows show why.</p>
@@ -391,9 +401,10 @@ export default function MembersPage({ session }: { session: Session }) {
         <label>Min points<input type="number" step="1" value={roleMin} onChange={(e) => setRoleMin(e.target.value)} placeholder="any" disabled={roleBusy} /></label>
         <label>Max points<input type="number" step="1" value={roleMax} onChange={(e) => setRoleMax(e.target.value)} placeholder="any" disabled={roleBusy} /></label>
       </div>
+      <label className="exclude-roles">Leave alone anyone who currently has any of these roles (checked live at the moment you apply)<select multiple size={4} value={excludeRoleIds} onChange={(e) => setExcludeRoleIds([...e.target.selectedOptions].map((o) => o.value))} disabled={roleBusy}>{roles?.roles.map((r) => <option key={r.id} value={r.id}>{r.name}{r.booster ? ' (Server Booster)' : ''}</option>)}</select><small className="field-hint">Server Booster is preselected. Hold Ctrl (Cmd on Mac) to pick several.</small></label>
       <p className="muted small">Current page filters: {[segment !== 'everyone' ? SEGMENTS.find((s) => s.id === segment)?.label : null, protection !== 'any' ? PROTECTION.find((s) => s.id === protection)?.label : null, points !== 'any' ? POINTS.find((s) => s.id === points)?.label : null, joined !== 'any' ? JOINED.find((s) => s.id === joined)?.label : null, filter, search ? `search "${search}"` : null].filter(Boolean).join(' · ') || 'none'}</p>
-      {rolePreview && !roleResult && <><p className="import-summary"><strong>{rolePreview.matched}</strong> members match. {rolePreview.matched > 500 ? 'Showing the first 500.' : ''}</p><div className="table-wrap import-results"><table><tbody>{rolePreview.members?.map((m) => <tr key={m.discord_user_id}><td><span className="member-cell"><strong>{m.discord_username}</strong><small className="mono">{m.discord_user_id}</small></span></td><td className="score">{formatScore(m.score)}</td><td>{m.special_role ? <span className="status complete"><i />Protected</span> : ''}</td></tr>)}</tbody></table></div></>}
-      {roleResult && <><p className="import-summary">{roleAction === 'add' ? 'Gave' : 'Removed'} the role for <strong>{roleResult.changed?.length ?? 0}</strong> of {roleResult.matched} members{roleResult.failed?.length ? ` · ${roleResult.failed.length} failed` : ''}.</p>{roleResult.failed && roleResult.failed.length > 0 && <div className="table-wrap import-results"><table><tbody>{roleResult.failed.map((f) => <tr key={f.discord_user_id}><td><span className="member-cell"><strong>{f.discord_username}</strong><small className="mono">{f.discord_user_id}</small></span></td><td className="muted">{f.error}</td></tr>)}</tbody></table></div>}</>}
+      {rolePreview && !roleResult && <><p className="import-summary"><strong>{rolePreview.matched}</strong> members match{rolePreview.skipped?.length ? <> · <strong>{rolePreview.skipped.length}</strong> left alone because of their roles ({rolePreview.skipped.slice(0, 6).map((s) => s.discord_username).join(', ')}{rolePreview.skipped.length > 6 ? '…' : ''})</> : null}. {rolePreview.matched > 500 ? 'Showing the first 500.' : ''}</p><div className="table-wrap import-results"><table><tbody>{rolePreview.members?.map((m) => <tr key={m.discord_user_id}><td><span className="member-cell"><strong>{m.discord_username}</strong><small className="mono">{m.discord_user_id}</small></span></td><td className="score">{formatScore(m.score)}</td><td>{m.special_role ? <span className="status complete"><i />Protected</span> : ''}</td></tr>)}</tbody></table></div></>}
+      {roleResult && <><p className="import-summary">{roleAction === 'add' ? 'Gave' : 'Removed'} the role for <strong>{roleResult.changed?.length ?? 0}</strong> of {roleResult.matched} members{roleResult.failed?.length ? ` · ${roleResult.failed.length} failed` : ''}{roleResult.skipped?.length ? ` · ${roleResult.skipped.length} left alone because of their roles` : ''}.</p>{roleResult.skipped && roleResult.skipped.length > 0 && <div className="table-wrap import-results"><table><tbody>{roleResult.skipped.map((s) => <tr key={s.discord_user_id}><td><span className="member-cell"><strong>{s.discord_username}</strong><small className="mono">{s.discord_user_id}</small></span></td><td className="muted">{s.roles}</td></tr>)}</tbody></table></div>}{roleResult.failed && roleResult.failed.length > 0 && <div className="table-wrap import-results"><table><tbody>{roleResult.failed.map((f) => <tr key={f.discord_user_id}><td><span className="member-cell"><strong>{f.discord_username}</strong><small className="mono">{f.discord_user_id}</small></span></td><td className="muted">{f.error}</td></tr>)}</tbody></table></div>}</>}
       <div className="modal-actions"><button type="button" className="button ghost" onClick={() => setShowRoles(false)} disabled={roleBusy}>{roleResult ? 'Done' : 'Cancel'}</button>{!roleResult && <button type="button" className="button" onClick={previewRoles} disabled={roleBusy}>{roleBusy ? 'Working…' : 'Preview who matches'}</button>}{!roleResult && <button type="button" className="button primary" onClick={applyRoles} disabled={roleBusy || !roleId || !rolePreview} title={!rolePreview ? 'Preview first' : undefined}>{roleBusy ? 'Working…' : !rolePreview ? 'Preview first' : roleAction === 'add' ? `Give role to ${rolePreview.matched} members` : `Remove role from ${rolePreview.matched} members`}</button>}</div>
     </div></div>}
 

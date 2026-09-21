@@ -495,6 +495,33 @@ class TwitterApiClient:
             max_pages=max_pages,
         )
 
+    async def search_from_user(
+        self, handle: str, *, since: datetime, until: datetime, max_pages: int
+    ) -> list[Tweet]:
+        """A member's tweets and replies in the window via search (``from:``).
+
+        The timeline endpoint sometimes ends after a few dozen tweets even when the
+        account has years of history; search reaches further back for a given window.
+        """
+        query = (
+            f"from:{handle} since_time:{int(since.timestamp())} until_time:{int(until.timestamp())}"
+        )
+        result = await self._paginate(
+            "/twitter/tweet/advanced_search",
+            params={"query": query, "queryType": "Latest"},
+            item_key="tweets",
+            max_pages=max_pages,
+        )
+        tweets = []
+        for item in result.items:
+            try:
+                tweet = parse_tweet(item)
+            except (ValueError, TypeError):
+                continue
+            if since <= tweet.created_at <= until:
+                tweets.append(tweet)
+        return tweets
+
     async def get_mentions(
         self, handle: str, *, since: datetime, until: datetime, max_pages: int
     ) -> PageResult:

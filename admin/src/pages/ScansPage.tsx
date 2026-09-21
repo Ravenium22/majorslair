@@ -75,7 +75,7 @@ export default function ScansPage() {
               <td className="mono">{run.period}</td>
               <td>{formatDate(run.started_at)}</td>
               <td>{duration(run)}</td>
-              <td>{run.source === 'admin' ? 'Dashboard' : 'Discord'}<small className="block mono">{run.triggered_by}</small></td>
+              <td>{run.source === 'member' ? <>Member scan<small className="block">{String(s.discord_username ?? '')}</small></> : <>{run.source === 'admin' ? 'Dashboard' : 'Discord'}<small className="block mono">{run.triggered_by}</small></>}</td>
               <td>{String(s.source_posts ?? '—')}</td>
               <td>{String(s.discovered ?? '—')}</td>
               <td>{changes.length ? `${changes.length} members` : run.status === 'complete' ? '0' : '—'}</td>
@@ -84,7 +84,14 @@ export default function ScansPage() {
             </tr>
             {expanded && <tr className="scan-detail"><td colSpan={11}>
               {run.error && <p className="estimate-warning">Failed: {run.error}</p>}
-              <div className="report-grid">
+              {s.member_scan ? <div className="report-grid"><section><h4>Single-member scan · {String(s.discord_username ?? '')} (@{String(s.twitter_handle ?? '')})</h4><dl>
+                <div><dt>Tweets read</dt><dd>{String(s.tweets_read ?? 0)}</dd></div>
+                <div><dt>From the timeline feed</dt><dd>{String(s.timeline_read ?? s.tweets_read ?? 0)}{s.timeline_ended_early ? <small>feed stopped at {s.timeline_ended_at ? formatDate(String(s.timeline_ended_at)) : 'an earlier date'}; search added {String(s.search_filled ?? 0)}</small> : null}</dd></div>
+                <div><dt>Matched</dt><dd>{String(s.matched ?? 0)}<small>{String(s.replies ?? 0)} replies · {String(s.quotes ?? 0)} quotes · {String(s.mentions ?? 0)} mentions</small></dd></div>
+                <div><dt>New actions</dt><dd>{String(s.new_actions ?? 0)}</dd></div>
+                <div><dt>Points</dt><dd>{formatScore(Number(s.points_before ?? 0))} → {formatScore(Number(s.points_after ?? 0))}</dd></div>
+                <div><dt>Approx. credits</dt><dd>{cost.toLocaleString()} <small>(${(cost * CREDIT_USD).toFixed(3)})</small></dd></div>
+              </dl></section></div> : <div className="report-grid">
                 <section>
                   <h4>Matched this scan</h4>
                   <dl>
@@ -111,7 +118,7 @@ export default function ScansPage() {
                     <div><dt>Renamed on X</dt><dd>{renamed.length}</dd></div>
                   </dl>
                 </section>
-              </div>
+              </div>}
               {unavailable.length > 0 && <section className="report-block"><h4>Could not verify these X accounts</h4><div className="table-wrap"><table><tbody>{unavailable.map((item) => <tr key={String(item.discord_user_id)}><td><span className="member-cell"><strong>{String(item.discord_username)}</strong><small className="mono">{String(item.discord_user_id)}</small></span></td><td><a href={`https://x.com/${String(item.twitter_handle)}`} target="_blank">@{String(item.twitter_handle)}</a></td><td><span className="status failed"><i />{String(item.status)}</span></td><td className="muted">{String(item.reason ?? '')}</td></tr>)}</tbody></table></div></section>}
               {renamed.length > 0 && <section className="report-block"><h4>Handles updated automatically</h4><div className="table-wrap"><table><tbody>{renamed.map((item) => <tr key={String(item.discord_user_id)}><td><span className="member-cell"><strong>{String(item.discord_username)}</strong><small className="mono">{String(item.discord_user_id)}</small></span></td><td className="muted">@{String(item.old_handle)} → @{String(item.new_handle)}</td></tr>)}</tbody></table></div></section>}
               {changes.length > 0 && <section className="report-block"><h4>Points moved by this scan</h4><div className="table-wrap"><table><thead><tr><th>Member</th><th>X</th><th>Before</th><th>After</th><th>Change</th></tr></thead><tbody>{changes.map((item) => { const delta = Number(item.after) - Number(item.before); return <tr key={String(item.discord_user_id)}><td><span className="member-cell"><strong>{String(item.discord_username)}</strong><small className="mono">{String(item.discord_user_id)}</small></span></td><td>{item.twitter_handle ? <a href={`https://x.com/${String(item.twitter_handle)}`} target="_blank">@{String(item.twitter_handle)}</a> : <span className="muted">—</span>}</td><td className="score">{formatScore(Number(item.before))}</td><td className="score">{formatScore(Number(item.after))}</td><td className={`score ${delta >= 0 ? 'gain' : 'loss'}`}>{delta >= 0 ? '+' : ''}{formatScore(delta)}</td></tr> })}</tbody></table></div>{Number(s.score_changes_total ?? changes.length) > changes.length && <p className="muted small">Showing the {changes.length} largest of {String(s.score_changes_total)} changes.</p>}</section>}

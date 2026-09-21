@@ -362,6 +362,14 @@ class EngagementService:
             tweet.author_handle, since=window_since, until=window_until, max_pages=3
         )
         in_timeline = any(item.tweet_id == tweet_id for item in timeline)
+        try:
+            by_author = await self.twitter.search_from_user(
+                tweet.author_handle, since=window_since, until=window_until, max_pages=3
+            )
+        except TwitterApiError:
+            by_author = []
+        in_author_search = any(item.tweet_id == tweet_id for item in by_author)
+        result["author_search"] = {"found": in_author_search, "returned": len(by_author)}
         timeline_pages = self._config_int(config, "member_timeline_pages", minimum=0)
         result["timeline"] = {
             "found": in_timeline,
@@ -379,10 +387,16 @@ class EngagementService:
                 "to 1 or more and the next scan will log it (about 300 credits per member per "
                 "page)."
             )
+        elif in_author_search:
+            findings.append(
+                "The author's timeline feed does not reach it, but a search for the author's "
+                "own posts (from:@handle) does. A single-member scan will log it: it now falls "
+                "back to that search when the timeline runs dry."
+            )
         else:
             findings.append(
-                "Even the author's own timeline does not return it in this window; the bot has "
-                "no way to see it."
+                "Neither the author's timeline nor a search for their own posts returns it; "
+                "the bot has no way to see it."
             )
         return result
 
@@ -411,6 +425,40 @@ class EngagementService:
             raise ValueError(f"{member.discord_username} is inactive")
         if self._scan_lock.locked():
             raise ValueError("An engagement scan is running; try again when it finishes.")
+        run_id = await self.repository.create_scan_run(
+            period=period_label, triggered_by=actor_discord_id, source="member"
+        )
+        try:
+            outcome = await self._scan_member_impl(
+                member=member,
+                duration=duration,
+                period_label=period_label,
+                actor_discord_id=actor_discord_id,
+                max_pages=max_pages,
+            )
+        except Exception as exc:
+            await self.repository.finish_scan_run(run_id, error=str(exc))
+            raise
+        report = {
+            **outcome,
+            "member_scan": True,
+            "discovered": outcome["matched"],
+            "tweets_returned": outcome["items_returned"],
+        }
+        await self.repository.finish_scan_run(run_id, summary=report)
+        outcome["scan_id"] = run_id
+        return outcome
+
+    async def _scan_member_impl(
+        self,
+        *,
+        member: LinkedUser,
+        duration: timedelta,
+        period_label: str,
+        actor_discord_id: str,
+        max_pages: int,
+    ) -> dict[str, Any]:
+        discord_user_id = member.discord_user_id
         async with self._scan_lock:
             config = await self.repository.get_config()
             rules = ScoringRules.from_mapping(config)
@@ -429,6 +477,27 @@ class EngagementService:
             tweets, complete = await self.twitter.get_user_timeline_with_replies(
                 member.twitter_handle, since=since, until=until, max_pages=max_pages
             )
+            timeline_count = len(tweets)
+            oldest = min((t.created_at for t in tweets), default=None)
+            timeline_ended_early = complete and (oldest is None or oldest > since)
+            search_filled = 0
+            if timeline_ended_early:
+                # X's timeline endpoint stopped before the window start (it often serves
+                # only the newest few dozen items); fill the rest through search.
+                fill_until = oldest if oldest is not None else until
+                known = {t.tweet_id for t in tweets}
+                try:
+                    extra = await self.twitter.search_from_user(
+                        member.twitter_handle, since=since, until=fill_until, max_pages=max_pages
+                    )
+                except TwitterApiError as exc:
+                    LOGGER.warning("from: search failed for @%s: %s", member.twitter_handle, exc)
+                    extra = []
+                for t in extra:
+                    if t.tweet_id not in known:
+                        known.add(t.tweet_id)
+                        tweets.append(t)
+                        search_filled += 1
             actions: list[EngagementAction] = []
             seen: set[str] = set()
             for tweet in tweets:
@@ -488,6 +557,10 @@ class EngagementService:
                 "twitter_handle": member.twitter_handle,
                 "period": period_label,
                 "tweets_read": len(tweets),
+                "timeline_read": timeline_count,
+                "timeline_ended_at": isoformat(oldest) if oldest else "",
+                "timeline_ended_early": timeline_ended_early,
+                "search_filled": search_filled,
                 "complete": complete,
                 "matched": len(actions),
                 "new_actions": len(new_actions),

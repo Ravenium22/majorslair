@@ -259,3 +259,5 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .depth-picker { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .depth-custom { display: inline-flex; align-items: center; gap: 6px; margin: 0; color: var(--muted); font-size: 11px; text-transform: none; letter-spacing: 0; }.depth-custom input { width: 88px; min-height: 32px; margin: 0; padding: 4px 8px; font-size: 12px; }
 .member-scan-controls { flex-wrap: wrap; }
+.threshold-box { display: inline-flex; align-items: center; gap: 6px; margin: 0; color: var(--muted); font-size: 12px; }.threshold-box input { width: 72px; min-height: 32px; margin: 0; padding: 4px 8px; font-size: 12px; }
+.exclude-roles select { min-height: 96px; }
