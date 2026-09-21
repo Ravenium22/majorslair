@@ -37,6 +37,9 @@ class UserRow(Base):
     # or "unavailable" (deleted, deactivated, or otherwise gone).
     x_status: Mapped[str] = mapped_column(String(32), nullable=False, default="", server_default="")
     x_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # When the member joined the Discord server (from Sync from Discord). Newcomers get a
+    # grace period before they can appear in the low-activity report.
+    discord_joined_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (
         Index("ix_users_active_score", "active", "score"),

@@ -29,6 +29,7 @@ class LinkedUser:
     special_role_names: str = ""
     x_status: str = ""
     x_checked_at: str = ""
+    discord_joined_at: str = ""
 
 
 @dataclass(slots=True)

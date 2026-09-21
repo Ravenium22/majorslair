@@ -10,7 +10,7 @@ const groups: Record<string, string[]> = {
   'Primary account points': ['reply_primary', 'quote_primary', 'retweet_primary', 'mention_primary'],
   'Secondary account points': ['reply_secondary', 'quote_secondary', 'retweet_secondary', 'mention_secondary'],
   'Quality signals': ['minimum_words', 'low_effort_multiplier', 'word_bonus_8', 'word_bonus_20', 'question_bonus', 'reference_bonus', 'media_bonus', 'link_bonus', 'quality_bonus_cap'],
-  'Scan guardrails': ['default_check_period', 'default_refresh_period', 'max_source_pages', 'max_action_pages_per_post', 'max_mention_pages', 'max_reply_search_pages', 'member_timeline_pages', 'daily_scored_action_cap', 'low_activity_threshold', 'skip_protected_members', 'protected_role_names'],
+  'Scan guardrails': ['default_check_period', 'default_refresh_period', 'max_source_pages', 'max_action_pages_per_post', 'max_mention_pages', 'max_reply_search_pages', 'member_timeline_pages', 'daily_scored_action_cap', 'low_activity_threshold', 'newcomer_grace_days', 'skip_protected_members', 'protected_role_names'],
   'Content rules': ['blacklist', 'reference_keywords'],
 }
 

@@ -520,7 +520,8 @@ class EngagementCog(commands.Cog):
             effective = float(
                 config.get("low_activity_threshold", DEFAULT_CONFIG["low_activity_threshold"])
             )
-        users = await self.bot.repository.low_activity(effective)
+        grace = int(config.get("newcomer_grace_days", DEFAULT_CONFIG["newcomer_grace_days"]))
+        users = await self.bot.repository.low_activity(effective, grace_days=grace)
         if users:
             lines = [
                 f"<@{user.discord_user_id}> · {score_label(user.score)} pts · "
@@ -541,7 +542,8 @@ class EngagementCog(commands.Cog):
         embed.set_footer(
             text=(
                 f"{len(users)} members · {unlinked} without an X account · "
-                "special-role members are excluded"
+                "special-role members excluded"
+                + (f" · joined < {grace} days ago excluded" if grace > 0 else "")
             )
         )
         await interaction.followup.send(embed=embed, ephemeral=True)

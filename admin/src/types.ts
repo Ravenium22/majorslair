@@ -19,6 +19,7 @@ export type LinkedUser = {
   special_role_names: string
   x_status: '' | 'ok' | 'suspended' | 'unavailable'
   x_checked_at: string
+  discord_joined_at: string
 }
 
 export type Scan = {

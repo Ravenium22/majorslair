@@ -22,6 +22,7 @@ DEFAULT_CONFIG: dict[str, str] = {
     "member_timeline_pages": "0",
     "protected_role_names": "",
     "low_activity_threshold": "5",
+    "newcomer_grace_days": "30",
     "skip_protected_members": "false",
     "blacklist": "lfg,gm,gn,alpha,bullish,fire,moon,send it,lets go,let's go",
     "reference_keywords": (
@@ -76,6 +77,10 @@ CONFIG_DESCRIPTIONS: dict[str, str] = {
         "Sync from Discord marks members holding any of them as protected."
     ),
     "low_activity_threshold": "Score at or below this appears in the low-activity report.",
+    "newcomer_grace_days": (
+        "Members who joined the Discord server fewer than this many days ago never appear in "
+        "the low-activity report. Join dates come from Sync from Discord. 0 = no grace."
+    ),
     "skip_protected_members": (
         "true = scans neither score nor X-verify special-role members by default; "
         "each scan can still override this."

@@ -283,3 +283,30 @@ async def test_reconcile_only_deactivates_tweets_x_confirms_gone(
         for a in await repository.list_actions(cycle_id="c", include_inactive=True)
     }
     assert rows == {"hidden": True, "deleted": False}
+
+
+@pytest.mark.asyncio
+async def test_newcomers_get_a_grace_period_in_low_activity(
+    repository: DatabaseRepository,
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC)
+    await repository.register_member(
+        discord_user_id="1", discord_username="fresh", discord_joined_at=now - timedelta(days=3)
+    )
+    await repository.register_member(
+        discord_user_id="2", discord_username="old", discord_joined_at=now - timedelta(days=90)
+    )
+    await repository.register_member(discord_user_id="3", discord_username="unknown")
+
+    ids = lambda users: sorted(u.discord_user_id for u in users)  # noqa: E731
+    assert ids(await repository.low_activity(5)) == ["1", "2", "3"]
+    assert ids(await repository.low_activity(5, grace_days=30)) == ["2", "3"]
+
+    page = await repository.paginated_users(joined="new", grace_days=30)
+    assert [i["discord_user_id"] for i in page["items"]] == ["1"]
+    page = await repository.paginated_users(joined="established", grace_days=30)
+    assert sorted(i["discord_user_id"] for i in page["items"]) == ["2", "3"]
+    fresh = await repository.get_user("1")
+    assert fresh is not None and fresh.discord_joined_at

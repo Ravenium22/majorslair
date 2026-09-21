@@ -142,6 +142,7 @@ class DatabaseRepository:
             special_role_names=row.special_role_names or "",
             x_status=row.x_status or "",
             x_checked_at=isoformat(row.x_checked_at) if row.x_checked_at else "",
+            discord_joined_at=isoformat(row.discord_joined_at) if row.discord_joined_at else "",
         )
 
     async def list_users(self, *, active_only: bool = False) -> list[LinkedUser]:
@@ -160,6 +161,7 @@ class DatabaseRepository:
         discord_username: str,
         special_role: bool | None = None,
         special_role_names: str | None = None,
+        discord_joined_at: datetime | None = None,
     ) -> tuple[LinkedUser, bool]:
         """Make sure a member exists in the registry, with or without an X account.
 
@@ -183,6 +185,7 @@ class DatabaseRepository:
                     handle_history=[],
                     special_role=bool(special_role),
                     special_role_names=(special_role_names or "").strip()[:255],
+                    discord_joined_at=discord_joined_at,
                 )
                 session.add(row)
             else:
@@ -192,6 +195,8 @@ class DatabaseRepository:
                     row.special_role = special_role
                 if special_role_names is not None:
                     row.special_role_names = special_role_names.strip()[:255]
+                if discord_joined_at is not None:
+                    row.discord_joined_at = discord_joined_at
                 row.updated_at = now
             await session.flush()
             user = self._linked_user(row)
@@ -357,15 +362,25 @@ class DatabaseRepository:
         return ranked[:limit]
 
     async def low_activity(
-        self, threshold: float, *, include_protected: bool = False
+        self,
+        threshold: float,
+        *,
+        include_protected: bool = False,
+        grace_days: int = 0,
     ) -> list[LinkedUser]:
         """Active members at or below the threshold, unlinked members first (score 0).
 
-        Special-role members are left out unless ``include_protected`` is set.
+        Special-role members are left out unless ``include_protected`` is set. Members who
+        joined the Discord server fewer than ``grace_days`` ago are left out too.
         """
         filters = [UserRow.active.is_(True), UserRow.score <= threshold]
         if not include_protected:
             filters.append(UserRow.special_role.is_(False))
+        if grace_days > 0:
+            cutoff = utc_now() - timedelta(days=grace_days)
+            filters.append(
+                or_(UserRow.discord_joined_at.is_(None), UserRow.discord_joined_at <= cutoff)
+            )
         statement = (
             select(UserRow)
             .where(*filters)
@@ -788,6 +803,8 @@ class DatabaseRepository:
         points: str = "any",
         low_threshold: float | None = None,
         sort: str = "score_desc",
+        joined: str = "any",
+        grace_days: int = 30,
         page: int = 1,
         page_size: int = 50,
     ) -> dict[str, Any]:
@@ -823,12 +840,21 @@ class DatabaseRepository:
             filters.append(UserRow.score <= 0)
         elif points == "low" and low_threshold is not None:
             filters.append(UserRow.score <= low_threshold)
+        if joined in {"new", "established"} and grace_days > 0:
+            cutoff = utc_now() - timedelta(days=grace_days)
+            if joined == "new":
+                filters.append(UserRow.discord_joined_at > cutoff)
+            else:
+                filters.append(
+                    or_(UserRow.discord_joined_at.is_(None), UserRow.discord_joined_at <= cutoff)
+                )
         orders = {
             "score_desc": (UserRow.score.desc(), UserRow.discord_username),
             "score_asc": (UserRow.score.asc(), UserRow.discord_username),
             "name": (func.lower(UserRow.discord_username),),
             "last_signal": (UserRow.last_active_at.desc().nulls_last(), UserRow.discord_username),
             "linked_at": (UserRow.linked_at.desc(), UserRow.discord_username),
+            "joined": (UserRow.discord_joined_at.desc().nulls_last(), UserRow.discord_username),
         }
         count_statement = select(func.count()).select_from(UserRow).where(*filters)
         statement = (

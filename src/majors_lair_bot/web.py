@@ -25,7 +25,7 @@ from .engagement import EngagementService
 from .scoring import DEFAULT_CONFIG, ScoringRules
 from .settings import Settings
 from .twitter_client import TwitterApiClient, TwitterApiError
-from .utils import parse_bool, parse_period, utc_now
+from .utils import parse_bool, parse_datetime, parse_period, utc_now
 
 LOGGER = logging.getLogger(__name__)
 DISCORD_API = "https://discord.com/api/v10"
@@ -414,14 +414,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         x_ok: bool | None = None,
         points: str = "any",
         sort: str = "score_desc",
+        joined: str = "any",
         page: int = 1,
         page_size: int = 50,
     ) -> dict[str, Any]:
         page, page_size = _page(page, page_size)
-        threshold = None
-        if points == "low":
-            config_values = await runtime.repository.get_config()
-            threshold = float(config_values["low_activity_threshold"])
+        config_values = await runtime.repository.get_config()
+        threshold = float(config_values["low_activity_threshold"]) if points == "low" else None
+        grace = int(config_values.get("newcomer_grace_days", DEFAULT_CONFIG["newcomer_grace_days"]))
         return await runtime.repository.paginated_users(
             search=search,
             active=active,
@@ -431,6 +431,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             points=points,
             low_threshold=threshold,
             sort=sort,
+            joined=joined,
+            grace_days=grace,
             page=page,
             page_size=page_size,
         )
@@ -445,12 +447,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         x_ok: bool | None = None,
         points: str = "any",
         sort: str = "score_desc",
+        joined: str = "any",
     ) -> Response:
         """The current member list, with the same filters as the page, as a CSV sheet."""
-        threshold = None
-        if points == "low":
-            config_values = await runtime.repository.get_config()
-            threshold = float(config_values["low_activity_threshold"])
+        config_values = await runtime.repository.get_config()
+        threshold = float(config_values["low_activity_threshold"]) if points == "low" else None
+        grace = int(config_values.get("newcomer_grace_days", DEFAULT_CONFIG["newcomer_grace_days"]))
         page = await runtime.repository.paginated_users(
             search=search,
             active=active,
@@ -460,6 +462,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             points=points,
             low_threshold=threshold,
             sort=sort,
+            joined=joined,
+            grace_days=grace,
             page=1,
             page_size=10000,
         )
@@ -478,6 +482,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "active",
                 "last_signal",
                 "linked_at",
+                "discord_joined_at",
             ]
         )
         for index, item in enumerate(page["items"], start=1):
@@ -494,6 +499,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "active" if item["active"] else "inactive",
                     item["last_active_at"],
                     item["linked_at"],
+                    item["discord_joined_at"],
                 ]
             )
         stamp = time.strftime("%Y-%m-%d")
@@ -723,6 +729,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             existing = registry.get(user_id)
             special_role = True if matched_roles else None
             special_names = ", ".join(matched_roles) if matched_roles else None
+            joined_at = None
+            if member.get("joined_at"):
+                try:
+                    joined_at = parse_datetime(member["joined_at"])
+                except (ValueError, TypeError):
+                    joined_at = None
             if existing is not None:
                 if existing.special_role and special_names and existing.special_role_names:
                     merged = sorted(
@@ -734,6 +746,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     discord_username=handle,
                     special_role=special_role,
                     special_role_names=special_names,
+                    discord_joined_at=joined_at,
                 )
                 if existing.discord_username != handle:
                     renamed.append(
@@ -757,6 +770,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 discord_username=handle,
                 special_role=special_role,
                 special_role_names=special_names,
+                discord_joined_at=joined_at,
             )
             added.append(
                 {
@@ -1050,15 +1064,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def low_activity(
         _: Admin, threshold: float | None = None, include_protected: bool = False
     ) -> dict[str, Any]:
+        config_values = await runtime.repository.get_config()
         if threshold is None:
-            config_values = await runtime.repository.get_config()
             threshold = float(config_values["low_activity_threshold"])
+        grace = int(config_values.get("newcomer_grace_days", DEFAULT_CONFIG["newcomer_grace_days"]))
         users_list = await runtime.repository.low_activity(
-            threshold, include_protected=include_protected
+            threshold, include_protected=include_protected, grace_days=grace
         )
         return {
             "threshold": threshold,
             "include_protected": include_protected,
+            "newcomer_grace_days": grace,
             "items": [asdict(user) for user in users_list],
         }
 

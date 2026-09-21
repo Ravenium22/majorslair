@@ -26,12 +26,19 @@ const POINTS = [
   { id: 'zero', label: '0 points' },
   { id: 'low', label: 'Low activity' },
 ] as const
+const JOINED = [
+  { id: 'any', label: 'Any join date' },
+  { id: 'new', label: 'Newcomers' },
+  { id: 'established', label: 'Established' },
+] as const
+const daysAgo = (iso: string) => Math.floor((Date.now() - new Date(iso).getTime()) / 86400000)
 const SORTS = [
   { id: 'score_desc', label: 'Points: high to low' },
   { id: 'score_asc', label: 'Points: low to high' },
   { id: 'name', label: 'Discord handle A→Z' },
   { id: 'last_signal', label: 'Most recent activity' },
   { id: 'linked_at', label: 'Recently added' },
+  { id: 'joined', label: 'Joined Discord: newest' },
 ] as const
 
 export default function MembersPage({ session }: { session: Session }) {
@@ -40,6 +47,7 @@ export default function MembersPage({ session }: { session: Session }) {
   const [segment, setSegment] = useState<(typeof SEGMENTS)[number]['id']>('everyone')
   const [protection, setProtection] = useState<(typeof PROTECTION)[number]['id']>('any')
   const [points, setPoints] = useState<(typeof POINTS)[number]['id']>('any')
+  const [joined, setJoined] = useState<(typeof JOINED)[number]['id']>('any')
   const [sort, setSort] = useState<(typeof SORTS)[number]['id']>('score_desc')
   const [page, setPage] = useState(1)
   const [showLink, setShowLink] = useState(false)
@@ -69,13 +77,14 @@ export default function MembersPage({ session }: { session: Session }) {
     ...SEGMENTS.find((item) => item.id === segment)?.query,
     ...PROTECTION.find((item) => item.id === protection)?.query,
     ...(points !== 'any' ? { points } : {}),
+    ...(joined !== 'any' ? { joined } : {}),
     ...(sort !== 'score_desc' ? { sort } : {}),
-  }).toString(), [search, filter, segment, protection, points, sort])
+  }).toString(), [search, filter, segment, protection, points, joined, sort])
   const query = `${filterQuery}&page=${page}&page_size=25`
   const { data, mutate, isLoading } = useSWR<Paginated<LinkedUser>>(`/api/users?${query}`, api)
   const resetPage = <T,>(setter: (value: T) => void) => (value: T) => { setter(value); setPage(1) }
-  const hasFilters = Boolean(search) || filter !== 'active' || segment !== 'everyone' || protection !== 'any' || points !== 'any'
-  const clearFilters = () => { setSearch(''); setFilter('active'); setSegment('everyone'); setProtection('any'); setPoints('any'); setSort('score_desc'); setPage(1) }
+  const hasFilters = Boolean(search) || filter !== 'active' || segment !== 'everyone' || protection !== 'any' || points !== 'any' || joined !== 'any'
+  const clearFilters = () => { setSearch(''); setFilter('active'); setSegment('everyone'); setProtection('any'); setPoints('any'); setJoined('any'); setSort('score_desc'); setPage(1) }
 
   const patch = async (user: LinkedUser, body: Record<string, unknown>, success: string) => {
     try {
@@ -225,16 +234,18 @@ export default function MembersPage({ session }: { session: Session }) {
         <div className="segmented">{SEGMENTS.map((item) => <button className={segment === item.id ? 'active' : ''} onClick={() => resetPage(setSegment)(item.id)} key={item.id}>{item.label}</button>)}</div>
         <div className="segmented">{PROTECTION.map((item) => <button className={protection === item.id ? 'active' : ''} onClick={() => resetPage(setProtection)(item.id)} key={item.id}>{item.label}</button>)}</div>
         <div className="segmented">{POINTS.map((item) => <button className={points === item.id ? 'active' : ''} onClick={() => resetPage(setPoints)(item.id)} key={item.id} title={item.id === 'low' ? 'At or below the low-activity threshold from Scoring rules' : undefined}>{item.label}</button>)}</div>
+        <div className="segmented">{JOINED.map((item) => <button className={joined === item.id ? 'active' : ''} onClick={() => resetPage(setJoined)(item.id)} key={item.id} title={item.id === 'new' ? 'Joined Discord within the grace period (newcomer_grace_days in Scoring rules); never in the low-activity report' : item.id === 'established' ? 'Joined before the grace period, or join date unknown' : undefined}>{item.label}</button>)}</div>
         <div className="segmented">{['active', 'inactive', 'all'].map((value) => <button className={filter === value ? 'active' : ''} onClick={() => resetPage(setFilter)(value)} key={value}>{value}</button>)}</div>
         <span className="filter-count">{data ? `${data.total.toLocaleString()} member${data.total === 1 ? '' : 's'}` : ''}{hasFilters && <button className="link-button" onClick={clearFilters}>Clear filters</button>}</span>
       </div>
-      <div className="table-wrap"><table><thead><tr><th>Discord</th><th>X identity</th><th>Special role</th><th>Score</th><th>Last signal</th><th>Status</th><th aria-label="Actions" /></tr></thead><tbody>
+      <div className="table-wrap"><table><thead><tr><th>Discord</th><th>X identity</th><th>Special role</th><th>Score</th><th>Last signal</th><th>Joined Discord</th><th>Status</th><th aria-label="Actions" /></tr></thead><tbody>
         {data?.items.map((user) => <tr key={user.discord_user_id} className="member-row" onClick={() => openMember(user)}>
           <td><span className="member-cell"><strong>{user.discord_username}</strong><small className="mono">{user.discord_user_id}</small></span></td>
           <td>{user.twitter_user_id ? <span className="protected-cell"><a href={`https://x.com/${user.twitter_handle}`} target="_blank">@{user.twitter_handle}</a>{(user.x_status === 'suspended' || user.x_status === 'unavailable') && <span className="status failed"><i />X {user.x_status}</span>}</span> : <span className="muted">Not linked</span>}</td>
           <td>{user.special_role ? <span className="protected-cell"><span className="status complete"><i />Protected</span>{user.special_role_names && <small>{user.special_role_names}</small>}</span> : <span className="muted">—</span>}</td>
           <td className="score">{formatScore(user.score)}</td>
           <td>{formatDate(user.last_active_at)}</td>
+          <td>{user.discord_joined_at ? <span className="protected-cell">{formatDate(user.discord_joined_at)}<small>{daysAgo(user.discord_joined_at)} days ago</small></span> : <span className="muted" title="Run Sync from Discord to fill join dates">—</span>}</td>
           <td><span className={`status ${user.active ? 'complete' : 'failed'}`}><i />{user.active ? 'Active' : 'Inactive'}</span></td>
           <td className="row-actions" onClick={(e) => e.stopPropagation()}>
             <button className="icon-button" title="Open member: history and edit" onClick={() => { openMember(user); setEditing(true) }}><Pencil size={17} /></button>
@@ -257,6 +268,7 @@ export default function MembersPage({ session }: { session: Session }) {
         {selected.special_role && <span className="status complete"><i />Protected{selected.special_role_names ? ` · ${selected.special_role_names}` : ''}</span>}
         {(selected.x_status === 'suspended' || selected.x_status === 'unavailable') && <span className="status failed"><i />X {selected.x_status}</span>}
         <span className={`status ${selected.active ? 'complete' : 'failed'}`}><i />{selected.active ? 'Active' : 'Inactive'}</span>
+        {selected.discord_joined_at && <span className="muted">joined Discord {formatDate(selected.discord_joined_at)} ({daysAgo(selected.discord_joined_at)} days ago)</span>}
         {selected.handle_history && <span className="muted">previous X: {selected.handle_history.split('|').map((h) => `@${h}`).join(', ')}</span>}
       </div>
       {!editing ? <div className="modal-actions left"><button className="button" onClick={() => setEditing(true)}><Pencil size={15} /> Edit member</button></div> : <form className="edit-grid" onSubmit={saveEdit}>
