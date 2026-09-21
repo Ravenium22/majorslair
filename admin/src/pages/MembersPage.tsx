@@ -52,6 +52,7 @@ export default function MembersPage({ session }: { session: Session }) {
   const [syncResult, setSyncResult] = useState<DiscordSyncResponse>()
   const [selected, setSelected] = useState<LinkedUser>()
   const [memberPeriod, setMemberPeriod] = useState('30d')
+  const [memberDepth, setMemberDepth] = useState(25)
   const [memberScanning, setMemberScanning] = useState(false)
   const [memberScan, setMemberScan] = useState<MemberScanResult>()
   const [editing, setEditing] = useState(false)
@@ -168,7 +169,7 @@ export default function MembersPage({ session }: { session: Session }) {
     if (!selected) return
     setMemberScanning(true)
     try {
-      const result = await mutateApi<MemberScanResult>(`/api/users/${selected.discord_user_id}/scan`, session.csrf_token, 'POST', { period: memberPeriod })
+      const result = await mutateApi<MemberScanResult>(`/api/users/${selected.discord_user_id}/scan`, session.csrf_token, 'POST', { period: memberPeriod, max_pages: memberDepth })
       setMemberScan(result)
       setSelected({ ...selected, score: result.points_after })
       setNotice({ text: `${result.discord_username}: ${result.matched} actions matched, ${result.new_actions} new, ${formatScore(result.points_before)} → ${formatScore(result.points_after)} pts.`, kind: 'success' })
@@ -266,8 +267,8 @@ export default function MembersPage({ session }: { session: Session }) {
         <div className="modal-actions"><button type="button" className="button ghost" onClick={() => setEditing(false)} disabled={saving}>Cancel</button><button className="button primary" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button></div>
       </form>}
       {selected.twitter_user_id && <div className="member-scan">
-        <div><h3 className="sub-heading">Scan this member only</h3><p className="muted small">Reads their own timeline (replies included) for the period and scores it. A few hundred credits at most. Catches replies X hides everywhere else.</p></div>
-        <div className="member-scan-controls"><select value={memberPeriod} onChange={(e) => setMemberPeriod(e.target.value)} disabled={memberScanning}><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option><option value="60d">Last 60 days</option><option value="90d">Last 90 days</option><option value="180d">Last 6 months</option><option value="365d">Last 12 months</option></select><button className="button primary" onClick={runMemberScan} disabled={memberScanning}>{memberScanning ? 'Scanning…' : 'Scan this member'}</button></div>
+        <div><h3 className="sub-heading">Scan this member only</h3><p className="muted small">Reads their own timeline (replies included) back to the start of the period or until the depth is reached, whichever comes first. Costs up to {(memberDepth * 20 * 15).toLocaleString()} credits (${((memberDepth * 20 * 15) / 100000).toFixed(2)}), usually far less because it stops at the period start. Catches replies X hides everywhere else. Pick a bigger depth for long periods on active posters.</p></div>
+        <div className="member-scan-controls"><select value={memberDepth} onChange={(e) => setMemberDepth(Number(e.target.value))} disabled={memberScanning} title="How far back into their timeline to read, at most"><option value={5}>Depth: latest 100 tweets</option><option value={25}>Depth: latest 500 tweets</option><option value={50}>Depth: latest 1,000 tweets</option><option value={100}>Depth: latest 2,000 tweets</option></select><select value={memberPeriod} onChange={(e) => setMemberPeriod(e.target.value)} disabled={memberScanning}><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option><option value="60d">Last 60 days</option><option value="90d">Last 90 days</option><option value="180d">Last 6 months</option><option value="365d">Last 12 months</option></select><button className="button primary" onClick={runMemberScan} disabled={memberScanning}>{memberScanning ? 'Scanning…' : 'Scan this member'}</button></div>
         {memberScan && <p className="import-summary">Read {memberScan.tweets_read} tweets · matched {memberScan.matched} ({memberScan.replies} replies, {memberScan.quotes} quotes, {memberScan.mentions} mentions) · {memberScan.new_actions} new · points {formatScore(memberScan.points_before)} → <strong>{formatScore(memberScan.points_after)}</strong>{memberScan.complete ? '' : ' · timeline page cap reached, older tweets skipped'} · ≈ {(Math.max(memberScan.items_returned, memberScan.api_requests) * 15).toLocaleString()} credits</p>}
       </div>}
       <h3 className="sub-heading">Engagement this cycle · {history ? `${history.total} action${history.total === 1 ? '' : 's'}` : '…'}</h3>

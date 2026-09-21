@@ -126,6 +126,7 @@ class VerifyRequest(BaseModel):
 
 class MemberScanRequest(BaseModel):
     period: str = Field(default="30d", min_length=2, max_length=10)
+    max_pages: int = Field(default=25, ge=1, le=100)
 
 
 class DiagnoseRequest(BaseModel):
@@ -635,6 +636,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 discord_user_id=discord_user_id,
                 period=payload.period,
                 actor_discord_id=str(admin["discord_user_id"]),
+                max_pages=payload.max_pages,
             )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc

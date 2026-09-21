@@ -413,11 +413,19 @@ class EngagementCog(commands.Cog):
     @app_commands.command(
         name="scan-member", description="Admin: deep-check one member's own timeline and score it"
     )
-    @app_commands.describe(member="The member to scan", period="Examples: 7d, 30d, 90d")
+    @app_commands.describe(
+        member="The member to scan",
+        period="Examples: 7d, 30d, 90d",
+        depth="How many of their latest tweets to read at most (default 500, max 2000)",
+    )
     @app_commands.guild_only()
     @admin_only()
     async def scan_member(
-        self, interaction: discord.Interaction, member: discord.Member, period: str = "30d"
+        self,
+        interaction: discord.Interaction,
+        member: discord.Member,
+        period: str = "30d",
+        depth: app_commands.Range[int, 20, 2000] = 500,
     ) -> None:
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
@@ -425,6 +433,7 @@ class EngagementCog(commands.Cog):
                 discord_user_id=str(member.id),
                 period=period,
                 actor_discord_id=str(interaction.user.id),
+                max_pages=max(1, depth // 20),
             )
         except (ValueError, TwitterApiError) as exc:
             await interaction.followup.send(str(exc), ephemeral=True)
