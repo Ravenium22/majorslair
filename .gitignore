@@ -16,3 +16,7 @@ docs/
 # Member exports and screenshots dropped in the project root
 *.csv
 *.png
+
+# Impeccable design tooling: keep the skill text, never the downloaded binary or local hooks
+.claude/skills/impeccable/scripts/bin/
+.claude/settings.local.json

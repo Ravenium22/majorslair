@@ -50,7 +50,7 @@ nav a.active::before, nav button.active::before { content: ""; position: absolut
 .profile strong, .profile small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .profile strong { font-size: 12px; }.profile small { color: var(--muted); font-size: 10px; margin-top: 2px; }
 .profile button, .mobile-close { border: 0; background: transparent; color: var(--muted); cursor: pointer; }
-.workspace { min-height: 100vh; margin-left: 252px; background-image: radial-gradient(circle at 84% 5%, rgb(87 197 182 / 5%), transparent 28%), linear-gradient(rgb(255 255 255 / 1.4%) 1px, transparent 1px), linear-gradient(90deg, rgb(255 255 255 / 1.4%) 1px, transparent 1px); background-size: auto, 42px 42px, 42px 42px; }
+.workspace { min-height: 100vh; margin-left: 252px; background-image: radial-gradient(circle at 84% 5%, rgb(87 197 182 / 5%), transparent 28%); }
 .page { max-width: 1540px; padding: 42px clamp(24px, 4vw, 64px) 72px; margin: auto; }
 .page-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 32px; margin-bottom: 32px; }
 .page-header h1 { margin: 0; font-family: Bahnschrift, "Arial Narrow", sans-serif; font-size: clamp(34px, 4.2vw, 58px); font-weight: 650; letter-spacing: -.045em; line-height: .98; }
@@ -222,3 +222,37 @@ a.button { text-decoration: none; }
 .header-toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line-soft); }
 .field-hint { display: block; margin-top: 6px; color: var(--muted); font-size: 11px; line-height: 1.5; text-transform: none; letter-spacing: 0; font-weight: 400; }
 @media (max-width: 760px) { .page-header-main { flex-direction: column; align-items: flex-start; gap: 14px; } }
+
+/* ---------- Operate-mode polish pass ----------
+   Readable minimums, one type family for UI labels (mono is reserved for IDs, codes and
+   numbers), tabular figures for data, themed browser surfaces, reduced-motion support,
+   and 40px touch targets. Appended last so it wins over the earlier rules. */
+.eyebrow, .nav-label, .status, th, .sub-heading, .report-grid h4, .report-block h4, .estimate-grid dt, .filter-count, .loading-row, .action-chip, .system-pill, .pagination, .metric > div, .scan-card label, .modal label, .config-group label, .adjust-fields label, .panel-head > span { font-family: inherit; }
+.eyebrow, .nav-label { font-size: 11px; letter-spacing: .12em; }
+.status { font-size: 11px; letter-spacing: .04em; }
+th { font-size: 11px; letter-spacing: .06em; color: var(--muted); }
+.mono { font-size: 11.5px; }
+.action-chip { font-size: 10.5px; letter-spacing: .04em; padding: 4px 8px; }
+.sub-heading, .report-grid h4, .report-block h4 { font-size: 11px; letter-spacing: .08em; }
+.estimate-grid dt, .report-grid dt { font-size: 11px; }
+.filter-count, .loading-row, .pagination span { font-size: 11px; }
+.scan-card label, .modal label, .config-group label, .adjust-fields label { font-size: 12px; letter-spacing: .04em; }
+.profile small, .metric small, .member-cell small, .leader-row small { font-size: 11px; }
+.metric > div { font-size: 12px; }
+input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
+input, textarea, select { caret-color: var(--amber); }
+::selection { background: rgb(231 168 66 / 28%); color: var(--text); }
+* { scrollbar-width: thin; scrollbar-color: #3b4541 transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }*::-webkit-scrollbar-thumb { background: #3b4541; border-radius: 5px; border: 2px solid transparent; background-clip: content-box; }*::-webkit-scrollbar-track { background: transparent; }
+.score, td, .metric strong, .estimate-grid dd, .leader-row strong, .report-grid dd, .standings-table td { font-variant-numeric: tabular-nums; }
+.icon-button { width: 40px; height: 40px; }
+.segmented button { min-height: 32px; padding: 6px 12px; font-size: 11px; }
+.pagination button { min-height: 36px; padding: 0 12px; }
+.page-jump input { min-height: 36px; }
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+  .status.running i { background: var(--amber); }
+  .button:hover { transform: none; }
+}
