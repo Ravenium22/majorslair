@@ -205,3 +205,7 @@ a.button { text-decoration: none; }
 .member-scan .sub-heading { margin-top: 0; }.member-scan p.small { margin: 4px 0 0; }
 .member-scan-controls { display: flex; gap: 10px; align-items: center; margin-top: 12px; }.member-scan-controls select { width: auto; min-width: 170px; margin: 0; }
 .depth-row { gap: 10px !important; flex-wrap: wrap; }.depth-row select { width: auto; min-width: 170px; margin: 0; min-height: 32px; padding: 4px 8px; font-size: 12px; }.depth-row .muted { font-size: 11px; }
+.adjust-panel { border-color: #3b4541; background: #0e1111; }
+.adjust-form { display: grid; grid-template-columns: auto 1fr 1fr auto; gap: 10px; align-items: center; margin-top: 12px; }.adjust-form input { margin: 0; }.adjust-form .segmented { margin: 0; }
+.adjust-panel .table-wrap { margin-top: 12px; max-height: 220px; overflow: auto; }
+@media (max-width: 900px) { .adjust-form { grid-template-columns: 1fr; } }

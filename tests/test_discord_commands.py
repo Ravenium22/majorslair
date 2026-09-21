@@ -42,6 +42,8 @@ async def test_all_specified_slash_commands_register() -> None:
         "my-history",
         "user-history",
         "scan-member",
+        "adjust-points",
+        "transfer-points",
         "check-engagement",
         "refresh-engagement",
         "track-post",

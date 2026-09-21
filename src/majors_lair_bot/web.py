@@ -19,7 +19,12 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from .database import DatabaseRepository, LinkConflictError, create_database_engine
+from .database import (
+    DatabaseRepository,
+    DatabaseRepositoryError,
+    LinkConflictError,
+    create_database_engine,
+)
 from .discord_app import EngagementBot
 from .engagement import EngagementService
 from .scoring import DEFAULT_CONFIG, ScoringRules
@@ -122,6 +127,12 @@ class ImportRequest(BaseModel):
 
 class VerifyRequest(BaseModel):
     skip_protected: bool = False
+
+
+class AdjustRequest(BaseModel):
+    points: float = Field(gt=-100000, lt=100000)
+    reason: str = Field(default="", max_length=300)
+    transfer_to: str | None = Field(default=None, max_length=120)
 
 
 class MemberScanRequest(BaseModel):
@@ -632,6 +643,52 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         assert user is not None
         return asdict(user)
+
+    @app.get("/api/users/{discord_user_id}/adjustments")
+    async def member_adjustments(discord_user_id: str, _: Admin) -> list[dict[str, Any]]:
+        return await runtime.repository.list_adjustments(discord_user_id)
+
+    @app.post("/api/users/{discord_user_id}/adjust")
+    async def adjust_member_points(
+        discord_user_id: str, payload: AdjustRequest, admin: MutatingAdmin
+    ) -> dict[str, Any]:
+        """Add or remove points, or transfer them to another member (id, Discord or X handle)."""
+        config_values = await runtime.repository.get_config()
+        cycle_id = config_values.get("current_cycle_id", DEFAULT_CONFIG["current_cycle_id"])
+        target_id: str | None = None
+        if payload.transfer_to:
+            target = await runtime.repository.find_member(payload.transfer_to)
+            if target is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No member matches '{payload.transfer_to}' (use Discord ID, "
+                    "Discord handle or X handle)",
+                )
+            target_id = target.discord_user_id
+        try:
+            rows = await runtime.repository.adjust_points(
+                cycle_id=cycle_id,
+                discord_user_id=discord_user_id,
+                points=payload.points,
+                reason=payload.reason.strip(),
+                actor_discord_id=str(admin["discord_user_id"]),
+                transfer_to=target_id,
+            )
+        except DatabaseRepositoryError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        await runtime.repository.append_audit(
+            event_type="admin_points_transferred" if target_id else "admin_points_adjusted",
+            actor_discord_id=str(admin["discord_user_id"]),
+            subject_discord_id=discord_user_id,
+            new_value=f"{payload.points:+g}",
+            details={
+                "reason": payload.reason.strip(),
+                "transfer_to": target_id or "",
+                "adjustments": rows,
+            },
+        )
+        member = await runtime.repository.get_user(discord_user_id)
+        return {"adjustments": rows, "member": asdict(member) if member else None}
 
     @app.post("/api/users/{discord_user_id}/scan")
     async def scan_member(

@@ -310,3 +310,66 @@ async def test_newcomers_get_a_grace_period_in_low_activity(
     assert sorted(i["discord_user_id"] for i in page["items"]) == ["2", "3"]
     fresh = await repository.get_user("1")
     assert fresh is not None and fresh.discord_joined_at
+
+
+@pytest.mark.asyncio
+async def test_point_adjustments_and_transfers_survive_rescoring(
+    repository: DatabaseRepository,
+) -> None:
+    from majors_lair_bot.database import DatabaseRepositoryError
+
+    await repository.link_user(
+        discord_user_id="1", discord_username="alice", twitter_handle="alice", twitter_user_id="1"
+    )
+    await repository.link_user(
+        discord_user_id="2", discord_username="bob", twitter_handle="bob", twitter_user_id="2"
+    )
+    config = await repository.get_config()
+    cycle = config["current_cycle_id"]
+
+    rows = await repository.adjust_points(
+        cycle_id=cycle, discord_user_id="1", points=10, reason="bonus", actor_discord_id="admin"
+    )
+    assert len(rows) == 1 and rows[0]["points"] == 10
+    assert (await repository.get_user("1")).score == 10
+
+    rows = await repository.adjust_points(
+        cycle_id=cycle,
+        discord_user_id="1",
+        points=4,
+        reason="move",
+        actor_discord_id="admin",
+        transfer_to="2",
+    )
+    assert [r["points"] for r in rows] == [-4, 4] and rows[0]["transfer_id"] == rows[1][
+        "transfer_id"
+    ]
+    assert (await repository.get_user("1")).score == 6
+    assert (await repository.get_user("2")).score == 4
+
+    # A rescore recomputes from actions + adjustments; nothing is lost.
+    await repository.save_scored_actions(cycle_id=cycle, scored_actions=[])
+    assert (await repository.get_user("1")).score == 6
+    assert (await repository.get_user("2")).score == 4
+
+    history = await repository.list_adjustments("2")
+    assert len(history) == 1 and history[0]["counterpart_discord_id"] == "1"
+
+    with pytest.raises(DatabaseRepositoryError):
+        await repository.adjust_points(
+            cycle_id=cycle, discord_user_id="1", points=0, reason="", actor_discord_id="admin"
+        )
+    with pytest.raises(DatabaseRepositoryError):
+        await repository.adjust_points(
+            cycle_id=cycle,
+            discord_user_id="1",
+            points=1,
+            reason="",
+            actor_discord_id="admin",
+            transfer_to="1",
+        )
+
+    assert (await repository.find_member("@BOB")).discord_user_id == "2"
+    assert (await repository.find_member("2")).discord_user_id == "2"
+    assert (await repository.find_member("alice")).discord_user_id == "1"
+    assert await repository.find_member("nobody") is None

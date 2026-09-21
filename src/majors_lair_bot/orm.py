@@ -125,6 +125,23 @@ class ConfigRow(Base):
     updated_by: Mapped[str] = mapped_column(String(32), nullable=False, default="system")
 
 
+class ScoreAdjustmentRow(Base):
+    """Manual points added, removed, or transferred by an admin. Survives every rescore."""
+
+    __tablename__ = "score_adjustments"
+
+    adjustment_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    cycle_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    discord_user_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    points: Mapped[float] = mapped_column(Float, nullable=False)
+    reason: Mapped[str] = mapped_column(String(300), nullable=False, default="")
+    actor_discord_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    # For transfers: the other member and the paired row.
+    counterpart_discord_id: Mapped[str] = mapped_column(String(32), nullable=False, default="")
+    transfer_id: Mapped[str] = mapped_column(String(36), nullable=False, default="", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class HistoricalSnapshotRow(Base):
     __tablename__ = "historical_snapshots"
 

@@ -43,7 +43,9 @@ Member commands:
 Admin commands:
 
 - `/user-history @member [limit]`
-- `/scan-member @member [period]`
+- `/scan-member @member [period] [depth]`
+- `/adjust-points @member <points> [reason]`
+- `/transfer-points @sender @receiver <points> [reason]`
 - `/check-engagement [period] [skip_protected]`
 - `/refresh-engagement`
 - `/track-post <url>`

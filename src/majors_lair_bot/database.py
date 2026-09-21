@@ -25,6 +25,7 @@ from .orm import (
     ConfigRow,
     HistoricalSnapshotRow,
     ScanRunRow,
+    ScoreAdjustmentRow,
     TrackedPostRow,
     UserRow,
 )
@@ -344,8 +345,18 @@ class DatabaseRepository:
             )
             .group_by(ActionRow.discord_user_id)
         )
+        adjustment_statement = (
+            select(
+                ScoreAdjustmentRow.discord_user_id,
+                func.coalesce(func.sum(ScoreAdjustmentRow.points), 0),
+            )
+            .where(ScoreAdjustmentRow.cycle_id == cycle_id, ScoreAdjustmentRow.created_at >= since)
+            .group_by(ScoreAdjustmentRow.discord_user_id)
+        )
         async with self.sessions() as session:
             sums = {row[0]: float(row[1] or 0) for row in (await session.execute(statement)).all()}
+            for row in (await session.execute(adjustment_statement)).all():
+                sums[row[0]] = sums.get(row[0], 0.0) + float(row[1] or 0)
             rows = (
                 await session.scalars(
                     select(UserRow).where(
@@ -662,10 +673,155 @@ class DatabaseRepository:
                 row = await session.get(ActionRow, action.action_key)
                 if row is not None:
                     self._apply_action(row, action)
+            adjustments = {
+                row[0]: float(row[1] or 0)
+                for row in (
+                    await session.execute(
+                        select(
+                            ScoreAdjustmentRow.discord_user_id,
+                            func.coalesce(func.sum(ScoreAdjustmentRow.points), 0),
+                        )
+                        .where(ScoreAdjustmentRow.cycle_id == cycle_id)
+                        .group_by(ScoreAdjustmentRow.discord_user_id)
+                    )
+                ).all()
+            }
             users = (await session.scalars(select(UserRow))).all()
             for user in users:
-                user.score = round(totals.get(user.discord_user_id, 0), 2)
+                user.score = round(
+                    totals.get(user.discord_user_id, 0) + adjustments.get(user.discord_user_id, 0),
+                    2,
+                )
                 user.last_active_at = latest.get(user.discord_user_id)
+
+    @staticmethod
+    def _adjustment_dict(row: ScoreAdjustmentRow) -> dict[str, Any]:
+        return {
+            "adjustment_id": row.adjustment_id,
+            "cycle_id": row.cycle_id,
+            "discord_user_id": row.discord_user_id,
+            "points": float(row.points),
+            "reason": row.reason,
+            "actor_discord_id": row.actor_discord_id,
+            "counterpart_discord_id": row.counterpart_discord_id,
+            "transfer_id": row.transfer_id,
+            "created_at": isoformat(row.created_at),
+        }
+
+    async def adjust_points(
+        self,
+        *,
+        cycle_id: str,
+        discord_user_id: str,
+        points: float,
+        reason: str,
+        actor_discord_id: str,
+        transfer_to: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Add or remove points for a member, or move them to ``transfer_to``.
+
+        Adjustments live in their own table so scans and rescoring never touch them. The
+        members' cached scores are updated immediately.
+        """
+        if points == 0:
+            raise DatabaseRepositoryError("Amount must not be zero")
+        now = utc_now()
+        rows: list[ScoreAdjustmentRow] = []
+        transfer_id = str(uuid.uuid4()) if transfer_to else ""
+        async with self.sessions.begin() as session:
+            source = await session.get(UserRow, discord_user_id, with_for_update=True)
+            if source is None:
+                raise DatabaseRepositoryError("Member not found")
+            target = None
+            if transfer_to:
+                if transfer_to == discord_user_id:
+                    raise DatabaseRepositoryError("Cannot transfer points to the same member")
+                target = await session.get(UserRow, transfer_to, with_for_update=True)
+                if target is None:
+                    raise DatabaseRepositoryError("Receiving member not found")
+                amount = abs(points)
+                rows.append(
+                    ScoreAdjustmentRow(
+                        adjustment_id=str(uuid.uuid4()),
+                        cycle_id=cycle_id,
+                        discord_user_id=discord_user_id,
+                        points=-amount,
+                        reason=reason[:300],
+                        actor_discord_id=actor_discord_id,
+                        counterpart_discord_id=transfer_to,
+                        transfer_id=transfer_id,
+                        created_at=now,
+                    )
+                )
+                rows.append(
+                    ScoreAdjustmentRow(
+                        adjustment_id=str(uuid.uuid4()),
+                        cycle_id=cycle_id,
+                        discord_user_id=transfer_to,
+                        points=amount,
+                        reason=reason[:300],
+                        actor_discord_id=actor_discord_id,
+                        counterpart_discord_id=discord_user_id,
+                        transfer_id=transfer_id,
+                        created_at=now,
+                    )
+                )
+                source.score = round(float(source.score or 0) - amount, 2)
+                target.score = round(float(target.score or 0) + amount, 2)
+                target.updated_at = now
+            else:
+                rows.append(
+                    ScoreAdjustmentRow(
+                        adjustment_id=str(uuid.uuid4()),
+                        cycle_id=cycle_id,
+                        discord_user_id=discord_user_id,
+                        points=points,
+                        reason=reason[:300],
+                        actor_discord_id=actor_discord_id,
+                        created_at=now,
+                    )
+                )
+                source.score = round(float(source.score or 0) + points, 2)
+            source.updated_at = now
+            for row in rows:
+                session.add(row)
+            await session.flush()
+            return [self._adjustment_dict(row) for row in rows]
+
+    async def list_adjustments(
+        self, discord_user_id: str, *, cycle_id: str | None = None, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        filters = [ScoreAdjustmentRow.discord_user_id == discord_user_id]
+        if cycle_id:
+            filters.append(ScoreAdjustmentRow.cycle_id == cycle_id)
+        statement = (
+            select(ScoreAdjustmentRow)
+            .where(*filters)
+            .order_by(ScoreAdjustmentRow.created_at.desc())
+            .limit(limit)
+        )
+        async with self.sessions() as session:
+            rows = (await session.scalars(statement)).all()
+        return [self._adjustment_dict(row) for row in rows]
+
+    async def find_member(self, query: str) -> LinkedUser | None:
+        """Resolve a Discord id, exact Discord handle, or exact X handle to a member."""
+        value = query.strip().lstrip("@")
+        if not value:
+            return None
+        async with self.sessions() as session:
+            if value.isdigit():
+                row = await session.get(UserRow, value)
+                if row is not None:
+                    return self._linked_user(row)
+            row = await session.scalar(
+                select(UserRow).where(func.lower(UserRow.discord_username) == value.lower())
+            )
+            if row is None:
+                row = await session.scalar(
+                    select(UserRow).where(func.lower(UserRow.twitter_handle) == value.lower())
+                )
+        return self._linked_user(row) if row else None
 
     async def user_history(
         self, discord_user_id: str, cycle_id: str, limit: int = 10

@@ -1,10 +1,10 @@
 import { useMemo, useState, type ChangeEvent, type FormEvent } from 'react'
-import { BadgeCheck, Download, ExternalLink, FileUp, Pencil, Plus, RefreshCw, Search, Shield, ShieldCheck, ShieldOff, UserRoundCheck, UserRoundX, X } from 'lucide-react'
+import { ArrowLeftRight, BadgeCheck, Download, ExternalLink, FileUp, Pencil, Plus, RefreshCw, Search, Shield, ShieldCheck, ShieldOff, UserRoundCheck, UserRoundX, X } from 'lucide-react'
 import useSWR from 'swr'
 import { api, formatDate, formatScore, mutateApi } from '../api'
 import { Empty, PageHeader, Pagination, Toast } from '../components'
 import { parseCsv, rowsFromSheet, type ImportRow } from '../csv'
-import type { Action, DiscordSyncResponse, ImportResponse, ImportStatus, LinkedUser, MemberScanResult, Paginated, Session, VerifyResponse } from '../types'
+import type { Action, Adjustment, DiscordSyncResponse, ImportResponse, ImportStatus, LinkedUser, MemberScanResult, Paginated, Session, VerifyResponse } from '../types'
 
 const STATUS_LABEL: Record<ImportStatus, string> = { linked: 'Linked', relinked: 'Handle updated', unchanged: 'Already linked', registered: 'Registered, no X', skipped: 'Skipped', conflict: 'Conflict', failed: 'Failed' }
 const STATUS_TONE: Record<ImportStatus, string> = { linked: 'complete', relinked: 'complete', unchanged: 'active', registered: 'running', skipped: '', conflict: 'failed', failed: 'failed' }
@@ -66,6 +66,9 @@ export default function MembersPage({ session }: { session: Session }) {
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const { data: history, mutate: mutateHistory } = useSWR<Paginated<Action>>(selected ? `/api/actions?discord_user_id=${selected.discord_user_id}&page_size=100` : null, api)
+  const { data: adjustments, mutate: mutateAdjustments } = useSWR<Adjustment[]>(selected ? `/api/users/${selected.discord_user_id}/adjustments` : null, api)
+  const [adjustMode, setAdjustMode] = useState<'add' | 'transfer'>('add')
+  const [adjusting, setAdjusting] = useState(false)
   const [verifying, setVerifying] = useState(false)
   const [verifyResult, setVerifyResult] = useState<VerifyResponse>()
   const [verifyPlan, setVerifyPlan] = useState<{ linked: number; protectedLinked: number }>()
@@ -174,6 +177,26 @@ export default function MembersPage({ session }: { session: Session }) {
 
   const openMember = (user: LinkedUser) => { setSelected(user); setEditing(false); setMemberScan(undefined) }
 
+  const submitAdjust = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!selected) return
+    const form = new FormData(event.currentTarget)
+    const points = Number(form.get('points'))
+    const reason = String(form.get('reason') ?? '').trim()
+    const transfer_to = adjustMode === 'transfer' ? String(form.get('transfer_to') ?? '').trim() : ''
+    if (!points || Number.isNaN(points)) { setNotice({ text: 'Enter a non-zero amount', kind: 'error' }); return }
+    if (adjustMode === 'transfer' && !transfer_to) { setNotice({ text: 'Enter who receives the points', kind: 'error' }); return }
+    setAdjusting(true)
+    try {
+      const result = await mutateApi<{ member: LinkedUser | null }>(`/api/users/${selected.discord_user_id}/adjust`, session.csrf_token, 'POST', { points: adjustMode === 'transfer' ? Math.abs(points) : points, reason, transfer_to: transfer_to || null })
+      if (result.member) setSelected(result.member)
+      setNotice({ text: adjustMode === 'transfer' ? `Moved ${formatScore(Math.abs(points))} points from ${selected.discord_username} to ${transfer_to}.` : `${points > 0 ? '+' : ''}${formatScore(points)} points for ${selected.discord_username}.`, kind: 'success' })
+      ;(event.target as HTMLFormElement).reset()
+      await Promise.all([mutate(), mutateAdjustments()])
+    } catch (error) { setNotice({ text: error instanceof Error ? error.message : 'Adjustment failed', kind: 'error' }) }
+    finally { setAdjusting(false) }
+  }
+
   const runMemberScan = async () => {
     if (!selected) return
     setMemberScanning(true)
@@ -278,6 +301,17 @@ export default function MembersPage({ session }: { session: Session }) {
         <label>Special role names<input name="special_role_names" defaultValue={selected.special_role_names} placeholder="Builder, Friend" /></label>
         <div className="modal-actions"><button type="button" className="button ghost" onClick={() => setEditing(false)} disabled={saving}>Cancel</button><button className="button primary" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button></div>
       </form>}
+      <div className="member-scan adjust-panel">
+        <div><h3 className="sub-heading"><ArrowLeftRight size={13} /> Points: add, remove or transfer</h3><p className="muted small">Manual adjustments are kept separately from scanned actions, so scans and rescoring never undo them. Every one is logged in the Audit trail with who did it and why.</p></div>
+        <form className="adjust-form" onSubmit={submitAdjust}>
+          <div className="segmented"><button type="button" className={adjustMode === 'add' ? 'active' : ''} onClick={() => setAdjustMode('add')}>Add / remove</button><button type="button" className={adjustMode === 'transfer' ? 'active' : ''} onClick={() => setAdjustMode('transfer')}>Transfer to someone</button></div>
+          <input name="points" type="number" step="0.5" placeholder={adjustMode === 'transfer' ? 'Amount to move' : 'Points, e.g. 10 or -5'} required disabled={adjusting} />
+          {adjustMode === 'transfer' && <input name="transfer_to" placeholder="Receiver: Discord handle, Discord ID or X handle" required disabled={adjusting} />}
+          <input name="reason" placeholder="Reason (shown in the audit trail)" maxLength={300} disabled={adjusting} />
+          <button className="button primary" disabled={adjusting}>{adjusting ? 'Saving…' : adjustMode === 'transfer' ? 'Transfer points' : 'Apply'}</button>
+        </form>
+        {adjustments && adjustments.length > 0 && <div className="table-wrap"><table><thead><tr><th>When</th><th>Points</th><th>Reason</th><th>By</th><th>Counterpart</th></tr></thead><tbody>{adjustments.map((a) => <tr key={a.adjustment_id}><td>{formatDate(a.created_at)}</td><td className={`score ${a.points >= 0 ? 'gain' : 'loss'}`}>{a.points >= 0 ? '+' : ''}{formatScore(a.points)}</td><td className="muted">{a.reason || '—'}</td><td className="mono">{a.actor_discord_id}</td><td className="mono">{a.counterpart_discord_id || '—'}</td></tr>)}</tbody></table></div>}
+      </div>
       {selected.twitter_user_id && <div className="member-scan">
         <div><h3 className="sub-heading">Scan this member only</h3><p className="muted small">Reads their own timeline (replies included) back to the start of the period or until the depth is reached, whichever comes first. Costs up to {(memberDepth * 20 * 15).toLocaleString()} credits (${((memberDepth * 20 * 15) / 100000).toFixed(2)}), usually far less because it stops at the period start. Catches replies X hides everywhere else. Pick a bigger depth for long periods on active posters.</p></div>
         <div className="member-scan-controls"><select value={memberDepth} onChange={(e) => setMemberDepth(Number(e.target.value))} disabled={memberScanning} title="How far back into their timeline to read, at most"><option value={5}>Depth: latest 100 tweets</option><option value={25}>Depth: latest 500 tweets</option><option value={50}>Depth: latest 1,000 tweets</option><option value={100}>Depth: latest 2,000 tweets</option></select><select value={memberPeriod} onChange={(e) => setMemberPeriod(e.target.value)} disabled={memberScanning}><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option><option value="60d">Last 60 days</option><option value="90d">Last 90 days</option><option value="180d">Last 6 months</option><option value="365d">Last 12 months</option></select><button className="button primary" onClick={runMemberScan} disabled={memberScanning}>{memberScanning ? 'Scanning…' : 'Scan this member'}</button></div>

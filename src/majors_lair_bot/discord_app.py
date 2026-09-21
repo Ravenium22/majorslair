@@ -8,7 +8,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from .database import DatabaseRepository, LinkConflictError
+from .database import DatabaseRepository, DatabaseRepositoryError, LinkConflictError
 from .engagement import EngagementService
 from .scoring import DEFAULT_CONFIG
 from .settings import Settings
@@ -410,6 +410,108 @@ class EngagementCog(commands.Cog):
             "Engagement scan",
             f"<@{interaction.user.id}> scanned `{summary.period_label}`: "
             f"{summary.discovered} matched actions, {summary.api_requests} API requests.",
+        )
+
+    @app_commands.command(
+        name="adjust-points", description="Admin: add or remove points for a member"
+    )
+    @app_commands.describe(
+        member="The member", points="Positive to add, negative to remove", reason="Why"
+    )
+    @app_commands.guild_only()
+    @admin_only()
+    async def adjust_points(
+        self,
+        interaction: discord.Interaction,
+        member: discord.Member,
+        points: float,
+        reason: str = "",
+    ) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        config = await self.bot.repository.get_config()
+        cycle_id = config.get("current_cycle_id", DEFAULT_CONFIG["current_cycle_id"])
+        try:
+            await self.bot.repository.adjust_points(
+                cycle_id=cycle_id,
+                discord_user_id=str(member.id),
+                points=points,
+                reason=reason,
+                actor_discord_id=str(interaction.user.id),
+            )
+        except DatabaseRepositoryError as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
+            return
+        updated = await self.bot.repository.get_user(str(member.id))
+        await self.bot.repository.append_audit(
+            event_type="admin_points_adjusted",
+            actor_discord_id=str(interaction.user.id),
+            subject_discord_id=str(member.id),
+            new_value=f"{points:+g}",
+            details={"reason": reason},
+        )
+        await interaction.followup.send(
+            f"{points:+g} points for {member.mention}"
+            + (f" ({reason})" if reason else "")
+            + f". Now **{score_label(updated.score if updated else 0)} pts**.",
+            ephemeral=True,
+        )
+        await self.bot.audit(
+            "Points adjusted",
+            f"<@{interaction.user.id}> gave **{points:+g}** to {member.mention}"
+            + (f": {reason}" if reason else ""),
+        )
+
+    @app_commands.command(
+        name="transfer-points", description="Admin: move points from one member to another"
+    )
+    @app_commands.describe(
+        sender="Member losing the points",
+        receiver="Member gaining them",
+        points="Amount",
+        reason="Why",
+    )
+    @app_commands.guild_only()
+    @admin_only()
+    async def transfer_points(
+        self,
+        interaction: discord.Interaction,
+        sender: discord.Member,
+        receiver: discord.Member,
+        points: app_commands.Range[float, 0.01, 100000.0],
+        reason: str = "",
+    ) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        config = await self.bot.repository.get_config()
+        cycle_id = config.get("current_cycle_id", DEFAULT_CONFIG["current_cycle_id"])
+        try:
+            await self.bot.repository.adjust_points(
+                cycle_id=cycle_id,
+                discord_user_id=str(sender.id),
+                points=points,
+                reason=reason,
+                actor_discord_id=str(interaction.user.id),
+                transfer_to=str(receiver.id),
+            )
+        except DatabaseRepositoryError as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
+            return
+        await self.bot.repository.append_audit(
+            event_type="admin_points_transferred",
+            actor_discord_id=str(interaction.user.id),
+            subject_discord_id=str(sender.id),
+            new_value=f"-{points:g}",
+            details={"reason": reason, "transfer_to": str(receiver.id)},
+        )
+        await interaction.followup.send(
+            f"Moved **{points:g}** points from {sender.mention} to {receiver.mention}"
+            + (f" ({reason})" if reason else "")
+            + ".",
+            ephemeral=True,
+        )
+        await self.bot.audit(
+            "Points transferred",
+            f"<@{interaction.user.id}> moved **{points:g}** from {sender.mention} to "
+            f"{receiver.mention}" + (f": {reason}" if reason else ""),
         )
 
     @app_commands.command(
