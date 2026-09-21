@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
+import type React from 'react'
 import {
   Activity,
   BookOpenCheck,
@@ -22,9 +23,21 @@ import MembersPage from './pages/MembersPage'
 import PostsPage from './pages/PostsPage'
 import ScoringPage from './pages/ScoringPage'
 
-const ActivityPage = lazy(() => import('./pages/ActivityPage'))
-const AuditPage = lazy(() => import('./pages/AuditPage'))
-const ScansPage = lazy(() => import('./pages/ScansPage'))
+// Pages below load as separate files. After a deploy the old file names vanish, so a
+// dashboard that was already open would show a blank page until reloaded. On a failed
+// load we reload once to pick up the new build instead of leaving the page blank.
+function lazyPage<T extends { default: React.ComponentType<any> }>(load: () => Promise<T>) {
+  return lazy(() => load().then((module) => { try { sessionStorage.removeItem('chunk-reload') } catch { /* ignore */ } return module }).catch((error: unknown) => {
+    let reloaded = false
+    try { reloaded = sessionStorage.getItem('chunk-reload') === '1'; if (!reloaded) sessionStorage.setItem('chunk-reload', '1') } catch { /* ignore */ }
+    if (!reloaded) { window.location.reload(); return new Promise<T>(() => {}) }
+    throw error
+  }))
+}
+
+const ActivityPage = lazyPage(() => import('./pages/ActivityPage'))
+const AuditPage = lazyPage(() => import('./pages/AuditPage'))
+const ScansPage = lazyPage(() => import('./pages/ScansPage'))
 
 const routes = [
   { id: 'overview', label: 'Overview', icon: CircleGauge },
