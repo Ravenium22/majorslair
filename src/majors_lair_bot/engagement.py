@@ -1121,6 +1121,7 @@ class EngagementService:
         verify_x: bool = True,
         include_protected: bool | None = None,
         read_timelines: bool | None = None,
+        timeline_pages: int | None = None,
     ) -> ScanSummary:
         """Run a scan. ``include_protected=None`` follows the skip_protected_members setting."""
         parse_period(period)
@@ -1143,6 +1144,7 @@ class EngagementService:
                 verify_x=verify_x,
                 include_protected=include_protected,
                 read_timelines=read_timelines,
+                timeline_pages=timeline_pages,
             )
             summary.scan_id = run_id
             await self.repository.finish_scan_run(run_id, summary=asdict(summary))
@@ -1159,6 +1161,7 @@ class EngagementService:
         verify_x: bool = True,
         include_protected: bool = True,
         read_timelines: bool | None = None,
+        timeline_pages: int | None = None,
     ) -> ScanSummary:
         duration, period_label = parse_period(period)
         async with self._scan_lock:
@@ -1236,12 +1239,17 @@ class EngagementService:
                 cycle_id=cycle_id,
                 since=since,
                 until=until,
-                # Per-scan switch: on = 1 page per member, off = nothing, None = the setting.
+                # Per-scan switch: off = nothing; on = the depth chosen for this scan (or the
+                # setting, at least 1 page); None = whatever the setting says.
                 max_pages=(
                     self._config_int(config, "member_timeline_pages", minimum=0)
                     if read_timelines is None
                     else (
-                        max(1, self._config_int(config, "member_timeline_pages", minimum=0))
+                        max(
+                            1,
+                            timeline_pages
+                            or self._config_int(config, "member_timeline_pages", minimum=0),
+                        )
                         if read_timelines
                         else 0
                     )

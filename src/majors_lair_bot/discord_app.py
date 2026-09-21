@@ -317,6 +317,7 @@ class EngagementCog(commands.Cog):
         period: str | None,
         skip_protected: bool | None = None,
         read_timelines: bool | None = None,
+        timeline_depth: int | None = None,
     ) -> None:
         await interaction.response.defer(thinking=True)
         if period is None:
@@ -327,6 +328,7 @@ class EngagementCog(commands.Cog):
             actor_discord_id=str(interaction.user.id),
             include_protected=None if skip_protected is None else not skip_protected,
             read_timelines=read_timelines,
+            timeline_pages=None if timeline_depth is None else max(1, timeline_depth // 20),
         )
         approximate_cost = summary.tweets_returned * 0.00018
         embed = discord.Embed(
@@ -461,6 +463,7 @@ class EngagementCog(commands.Cog):
             "Also read every member's own timeline to catch replies X hides "
             "(about 300 credits per member; default: the member_timeline_pages setting)"
         ),
+        timeline_depth="With read_timelines: how many latest tweets per member (20-2000)",
     )
     @app_commands.guild_only()
     @admin_only()
@@ -470,8 +473,9 @@ class EngagementCog(commands.Cog):
         period: str = "7d",
         skip_protected: bool | None = None,
         read_timelines: bool | None = None,
+        timeline_depth: app_commands.Range[int, 20, 2000] | None = None,
     ) -> None:
-        await self._run_scan(interaction, period, skip_protected, read_timelines)
+        await self._run_scan(interaction, period, skip_protected, read_timelines, timeline_depth)
 
     @app_commands.command(
         name="refresh-engagement", description="Run the configured short refresh scan"

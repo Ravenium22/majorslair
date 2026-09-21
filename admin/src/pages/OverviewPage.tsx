@@ -20,6 +20,7 @@ export default function OverviewPage({ session }: { session: Session }) {
   const [verifyX, setVerifyX] = useState(true)
   const [skipProtected, setSkipProtected] = useState(false)
   const [readTimelines, setReadTimelines] = useState(false)
+  const [timelinePages, setTimelinePages] = useState(1)
   const [starting, setStarting] = useState(false)
 
   const [loadingEstimate, setLoadingEstimate] = useState(false)
@@ -40,7 +41,7 @@ export default function OverviewPage({ session }: { session: Session }) {
     setStarting(true)
     setNotice({ text: `Starting ${period} engagement scan…`, kind: 'loading' })
     try {
-      await mutateApi('/api/scans', session.csrf_token, 'POST', { period, verify_x: verifyX, skip_protected: skipProtected, read_timelines: readTimelines })
+      await mutateApi('/api/scans', session.csrf_token, 'POST', { period, verify_x: verifyX, skip_protected: skipProtected, read_timelines: readTimelines, timeline_pages: readTimelines ? timelinePages : undefined })
       setEstimate(undefined)
       setNotice({ text: 'Scan queued. Results will appear here automatically.', kind: 'success' })
       await mutate()
@@ -53,7 +54,7 @@ export default function OverviewPage({ session }: { session: Session }) {
   const verifyCredits = verifyX ? verifyCount * (estimate?.verification_credits_per_account ?? 10) : 0
   const scanEstimate = estimate && !estimate.estimate.error ? estimate.estimate : undefined
   const timelineMembers = scanEstimate ? scanEstimate.timeline_members - (skipProtected ? Math.min(scanEstimate.timeline_members, estimate?.protected_linked ?? 0) : 0) : 0
-  const timelineCredits = readTimelines && scanEstimate ? Math.round(scanEstimate.timeline_credits_if_enabled * (timelineMembers / Math.max(1, scanEstimate.timeline_members))) : 0
+  const timelineCredits = readTimelines && scanEstimate ? timelineMembers * timelinePages * 20 * 15 : 0
   const totalLow = (scanEstimate?.credits_low ?? 0) - (scanEstimate?.timeline_pages ? 0 : 0) + verifyCredits + timelineCredits
   const totalHigh = (scanEstimate?.credits_high ?? 0) - (scanEstimate?.timeline_credits_max ?? 0) + verifyCredits + timelineCredits
   const usd = (credits: number) => `$${(credits / 100000).toFixed(2)}`
@@ -122,8 +123,8 @@ export default function OverviewPage({ session }: { session: Session }) {
         {scanEstimate?.warnings.length ? <p className="estimate-warning">{scanEstimate.warnings.join(' ')}</p> : null}
         <label className="check-row"><input type="checkbox" checked={skipProtected} onChange={(e) => setSkipProtected(e.target.checked)} disabled={starting} /> Skip protected members ({estimate.protected_linked}): not scored, not X-checked. Their existing points stay as they are.</label>
         <label className="check-row"><input type="checkbox" checked={verifyX} onChange={(e) => setVerifyX(e.target.checked)} disabled={starting} /> Verify X accounts during this scan ({verifyCount} accounts · ≈ {verifyCredits.toLocaleString()} credits)</label>
-        <label className="check-row"><input type="checkbox" checked={readTimelines} onChange={(e) => setReadTimelines(e.target.checked)} disabled={starting} /> Deep check: also read every member's own timeline to catch replies X hides everywhere else ({timelineMembers} members · ≈ {(readTimelines ? timelineCredits : Math.round((scanEstimate?.timeline_credits_if_enabled ?? 0) * (timelineMembers / Math.max(1, scanEstimate?.timeline_members ?? 1)))).toLocaleString()} credits ≈ {usd(readTimelines ? timelineCredits : Math.round((scanEstimate?.timeline_credits_if_enabled ?? 0) * (timelineMembers / Math.max(1, scanEstimate?.timeline_members ?? 1))))}). Off again next time.</label>
-        {readTimelines && <p className="estimate-warning">Depth: reads each member's latest <strong>{Math.max(1, scanEstimate?.timeline_pages ?? 0) * 20} tweets</strong> (setting <code>member_timeline_pages</code> = {scanEstimate?.timeline_pages ?? 0}, 0 counts as 1). Fine for a month. For a {PERIOD_LABEL[period] ?? period} window on active posters, raise it to 3–5 in Scoring rules → Scan guardrails before starting, then put it back to 0. Cost scales with it. The single-member scan on the Members page does not need this: it always reads up to 500 tweets.</p>}
+        <label className="check-row"><input type="checkbox" checked={readTimelines} onChange={(e) => setReadTimelines(e.target.checked)} disabled={starting} /> Deep check: also read every member's own timeline to catch replies X hides everywhere else ({timelineMembers} members). Off again next time.</label>
+        {readTimelines && <div className="check-row nested depth-row"><span>Depth per member:</span><select value={timelinePages} onChange={(e) => setTimelinePages(Number(e.target.value))} disabled={starting}><option value={1}>latest 20 tweets</option><option value={3}>latest 60 tweets</option><option value={5}>latest 100 tweets</option><option value={10}>latest 200 tweets</option><option value={25}>latest 500 tweets</option></select><span className="muted">≈ {timelineCredits.toLocaleString()} credits ({usd(timelineCredits)}) at most, less when it reaches the window start first</span></div>}
         <div className="modal-actions"><button type="button" className="button ghost" onClick={() => setEstimate(undefined)} disabled={starting}>Cancel</button><button className="button primary" onClick={scan} disabled={starting}><Play size={16} />{starting ? 'Starting…' : 'Start scan'}</button></div>
       </div></div>}
       <section className="panel scan-history">

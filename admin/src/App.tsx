@@ -144,13 +144,20 @@ function Shell({ session, children }: { session: Session; children: ReactNode })
           {routes.map((item) => {
             const Icon = item.icon
             return (
-              <button
+              <a
                 key={item.id}
+                href={`#${item.id}`}
                 className={route === item.id ? 'active' : ''}
-                onClick={() => navigate(item.id)}
+                onClick={(event) => {
+                  // Plain left-click navigates in place; modified clicks and right-click
+                  // "open in new tab" keep the browser's default link behaviour.
+                  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+                  event.preventDefault()
+                  navigate(item.id)
+                }}
               >
                 <Icon size={18} /> {item.label}
-              </button>
+              </a>
             )
           })}
         </nav>
