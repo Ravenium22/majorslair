@@ -14,6 +14,13 @@ export default function OverviewPage({ session }: { session: Session }) {
   const [window, setWindow] = useState<(typeof WINDOWS)[number][0]>('cycle')
   const { data: windowed } = useSWR<{ window: string; items: LinkedUser[] }>(window === 'cycle' ? null : `/api/leaderboard?window=${window}&limit=8`, api, { refreshInterval: 30000 })
   const board = window === 'cycle' ? data?.leaderboard ?? [] : windowed?.items ?? []
+  // Scaling every bar against the leader made ranks 4-8 identical 3% stubs whenever one
+  // member ran away with the cycle. The bars span the range actually on screen instead, and
+  // the exact points sit beside every one of them, so nothing is read off the bar alone.
+  const boardTop = Math.max(...board.map((u) => u.score), 0)
+  const boardFloor = Math.min(...board.map((u) => u.score), boardTop)
+  const barWidth = (score: number) =>
+    boardTop <= boardFloor ? 100 : 16 + ((score - boardFloor) / (boardTop - boardFloor)) * 84
   const [period, setPeriod] = useState('24h')
   const [notice, setNotice] = useState<{ text: string; kind: 'success' | 'error' | 'loading' }>()
   const [estimate, setEstimate] = useState<ScanEstimate>()
@@ -168,7 +175,7 @@ export default function OverviewPage({ session }: { session: Session }) {
                   <span className={`rank rank-${index + 1}`}>{String(index + 1).padStart(2, '0')}</span>
                   <div className="leader-avatar">{user.discord_username.slice(0, 1).toUpperCase()}</div>
                   <span className="member-cell"><strong>{user.discord_username}</strong><small>@{user.twitter_handle}</small></span>
-                  <div className="score-bar"><i style={{ width: `${Math.max(3, (user.score / Math.max(board[0]?.score || 1, 1)) * 100)}%` }} /></div>
+                  <div className="score-bar" aria-hidden="true"><i style={{ width: `${barWidth(user.score)}%` }} /></div>
                   <strong className="score">{formatScore(user.score)}</strong>
                 </div>
               ))}

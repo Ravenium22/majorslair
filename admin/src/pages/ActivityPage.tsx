@@ -2,18 +2,20 @@ import { useMemo, useState, type FormEvent } from 'react'
 import { ExternalLink, Search, Stethoscope } from 'lucide-react'
 import useSWR from 'swr'
 import { api, formatDate, formatScore, mutateApi } from '../api'
-import { Empty, Loading, PageHeader, Pagination, Toast, useEscape } from '../components'
+import { Empty, Loading, PageHeader, Pagination, SortTh, Toast, useEscape } from '../components'
 import type { Action, Diagnosis, Paginated, Session } from '../types'
 
 export default function ActivityPage({ session }: { session: Session }) {
   const [search, setSearch] = useState('')
   const [type, setType] = useState('')
   const [page, setPage] = useState(1)
+  const [sort, setSort] = useState('occurred_desc')
   const [showDiagnose, setShowDiagnose] = useState(false)
   const [diagnosing, setDiagnosing] = useState(false)
   const [diagnosis, setDiagnosis] = useState<Diagnosis>()
   const [notice, setNotice] = useState<{ text: string; kind: 'success' | 'error' }>()
-  const query = useMemo(() => new URLSearchParams({ search, action_type: type, page: String(page), page_size: '35' }).toString(), [search, type, page])
+  const query = useMemo(() => new URLSearchParams({ search, action_type: type, sort, page: String(page), page_size: '35' }).toString(), [search, type, sort, page])
+  const sortBy = (next: string) => { setSort(next); setPage(1) }
   const { data, isLoading } = useSWR<Paginated<Action>>(`/api/actions?${query}`, api)
 
   useEscape(showDiagnose && !diagnosing, () => { setShowDiagnose(false); setDiagnosis(undefined) })
@@ -35,7 +37,14 @@ export default function ActivityPage({ session }: { session: Session }) {
     {notice && <Toast message={notice.text} kind={notice.kind} />}
     <section className="panel">
       <div className="toolbar"><label className="search"><Search size={17} /><input value={search} onChange={(e) => { setSearch(e.target.value); setPage(1) }} placeholder="Search handle, text, or reason" /></label><select value={type} onChange={(e) => { setType(e.target.value); setPage(1) }}><option value="">All action types</option><option value="reply">Replies</option><option value="quote">Quotes</option><option value="retweet">Retweets</option><option value="mention">Mentions</option></select></div>
-      <div className="table-wrap"><table className="activity-table"><thead><tr><th>Member</th><th>Signal</th><th>Target</th><th>Content / decision</th><th>Points</th><th>Occurred</th><th /></tr></thead><tbody>{data?.items.map((item) => <tr className={item.active ? '' : 'muted-row'} key={item.action_key}><td><strong>@{item.twitter_handle}</strong><small className="mono block">{item.discord_user_id}</small></td><td><span className={`action-chip ${item.action_type}`}>{item.action_type}</span></td><td>@{item.target_handle}</td><td className="decision"><strong>{item.text || 'Native retweet'}</strong><small>{item.reason}</small></td><td className="score">{formatScore(item.points)}</td><td>{formatDate(item.occurred_at)}</td><td>{item.action_url && <a className="icon-button" href={item.action_url} target="_blank" title="Open on X"><ExternalLink size={16} /></a>}</td></tr>)}</tbody></table></div>
+      <div className="table-wrap"><table className="activity-table"><thead><tr>
+        <SortTh label="Member" direction={sort === 'member' ? 'asc' : undefined} onToggle={() => sortBy('member')} />
+        <SortTh label="Signal" direction={sort === 'type' ? 'asc' : undefined} onToggle={() => sortBy('type')} />
+        <th>Target</th><th>Content / decision</th>
+        <SortTh label="Points" className="score" direction={sort === 'points_desc' ? 'desc' : sort === 'points_asc' ? 'asc' : undefined} onToggle={() => sortBy(sort === 'points_desc' ? 'points_asc' : 'points_desc')} />
+        <SortTh label="Occurred" direction={sort === 'occurred_desc' ? 'desc' : sort === 'occurred_asc' ? 'asc' : undefined} onToggle={() => sortBy(sort === 'occurred_desc' ? 'occurred_asc' : 'occurred_desc')} />
+        <th />
+      </tr></thead><tbody>{data?.items.map((item) => <tr className={item.active ? '' : 'muted-row'} key={item.action_key}><td><a className="member-cell linked-cell" href={`#members?search=${item.discord_user_id}&open=${item.discord_user_id}`} title="Open this member"><strong>{item.discord_username || `@${item.twitter_handle}`}</strong><small>@{item.twitter_handle}</small></a></td><td><span className={`action-chip ${item.action_type}`}>{item.action_type}</span></td><td>@{item.target_handle}</td><td className="decision"><strong>{item.text || 'Native retweet'}</strong><small>{item.reason}</small></td><td className="score">{formatScore(item.points)}</td><td>{formatDate(item.occurred_at)}</td><td>{item.action_url && <a className="icon-button" href={item.action_url} target="_blank" title="Open on X"><ExternalLink size={16} /></a>}</td></tr>)}</tbody></table></div>
       {isLoading && !data && <Loading label="Loading activity…" />}
       {!isLoading && !data?.items.length && <Empty title="No matching activity" copy="Run a scan or adjust your search filters." />}
       <Pagination page={page} size={35} total={data?.total ?? 0} onChange={setPage} />

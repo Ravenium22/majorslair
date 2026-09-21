@@ -305,7 +305,10 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .action-chip { font-size: 10px; }
 
 /* The sign-out control measured 29x24: the only target under the 24px minimum. */
-.profile button, .mobile-close { min-width: 34px; min-height: 34px; display: grid; place-items: center; border-radius: 3px; }
+/* Sizing only: `display` stays with the rules that decide whether these are shown at all,
+   otherwise this would un-hide the mobile close button on desktop. */
+.profile button, .mobile-close { min-width: 34px; min-height: 34px; place-items: center; border-radius: 3px; }
+.profile button { display: grid; }
 .profile button:hover { color: var(--text); background: var(--surface-2); }
 
 /* A row's name cell is now the one real control in it, rather than the row being a button
@@ -339,3 +342,84 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .login-card h1 { text-transform: none; letter-spacing: -.03em; }
 .login-copy { font-size: 15px; }
 @media (max-width: 720px) { .login-card h1 { font-size: clamp(30px, 9vw, 40px); } }
+
+/* ---- Round four: sorting, role picking, and the last rough edges ---- */
+
+/* Sortable column headers. The control is the whole header cell, and the idle chevrons
+   say that sorting is available before anyone hovers. */
+th.sortable { padding: 0; }
+.th-sort { display: flex; align-items: center; gap: 6px; width: 100%; padding: 11px 15px; border: 0; background: transparent; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; }
+.th-sort:hover { color: var(--text); background: #121615; }
+.th-sort.active { color: var(--amber); }
+.th-sort-idle { opacity: .35; }
+.th-sort:hover .th-sort-idle { opacity: .7; }
+
+/* The protection toggle now says which state it is in, rather than relying on one
+   diagonal stroke to tell "protect" apart from "remove protection". */
+.icon-button.labelled { width: auto; height: 34px; gap: 6px; padding: 0 10px; display: inline-flex; align-items: center; font-size: 12px; }
+.icon-button.labelled.on { color: var(--green); border-color: #3f624d; }
+.icon-button.labelled.on:hover { color: var(--amber); border-color: #6e572e; }
+
+/* The row actions used to be the first thing a narrow window cut off. */
+/* The panel is translucent, so these match the colour it actually composites to. */
+.row-actions, .row-actions-head { position: sticky; right: 0; box-shadow: -12px 0 12px -12px #000; }
+.row-actions { background: #0f1212; }
+.row-actions-head { background: #0d1010; }
+.member-row:hover .row-actions { background: #101414; }
+
+/* Roles to leave alone: chips for what is picked, a filter, then a scrollable list. */
+.exclude-roles { margin-top: 20px; padding: 0; border: 0; }
+.exclude-roles legend { padding: 0; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.role-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 0; padding: 0; list-style: none; }
+.role-chips button { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 9px; border: 1px solid #3f624d; border-radius: 14px; color: var(--green); background: #121a16; font-size: 12px; cursor: pointer; }
+.role-chips button:hover { border-color: var(--red); color: #f0b0aa; background: #1d1211; }
+.role-search { display: flex !important; align-items: center; gap: 8px; margin-top: 12px !important; padding: 0 11px; border: 1px solid var(--line); background: #0b0e0e; color: var(--muted); text-transform: none !important; letter-spacing: 0 !important; }
+.role-search input { margin: 0; border: 0; background: transparent; min-height: 38px; }
+.role-options { max-height: 190px; overflow-y: auto; margin-top: 8px; border: 1px solid var(--line); background: #0b0e0e; }
+.role-options label { display: flex !important; align-items: center; gap: 9px; margin: 0 !important; padding: 8px 12px; border-bottom: 1px solid var(--line-soft); color: var(--text) !important; font-size: 13px !important; font-weight: 400 !important; text-transform: none !important; letter-spacing: 0 !important; cursor: pointer; }
+.role-options label:last-child { border-bottom: 0; }
+.role-options label:hover { background: #121615; }
+.role-options em { margin-left: 6px; color: var(--green); font-size: 11px; font-style: normal; }
+/* Inputs inside a modal are full-width text fields by default; these are checkboxes. */
+.role-options input[type="checkbox"], .role-inherit input[type="checkbox"], .pick-box input[type="checkbox"] { width: 16px; height: 16px; min-height: 0; margin: 0; flex: 0 0 auto; accent-color: var(--amber); }
+.role-options label > span { flex: 1; text-align: left; }
+
+/* A second dialog can sit above the drawer that opened it. */
+.modal-backdrop.stacked { z-index: 120; }
+.modal-narrow { max-width: 460px; }
+
+/* A scan can run for a quarter of an hour; it should not be invisible off the Overview. */
+.scan-ticker { display: flex; gap: 9px; align-items: flex-start; margin-bottom: 11px; padding: 10px 11px; border: 1px solid #6e572e; background: #191408; color: var(--amber-bright); font-size: 12px; }
+.scan-ticker:hover { border-color: var(--amber); color: var(--amber-bright); }
+.scan-ticker small { display: block; margin-top: 3px; color: #b59a6a; font-size: 11px; }
+
+/* The toast used to cover the page's own primary action in the top right. */
+.toast { top: 18px; right: auto; left: 50%; transform: translateX(-50%); }
+
+/* The audit line that says what happened, above the who-did-it line. */
+.audit-summary { margin: 9px 0 4px !important; color: var(--text) !important; font-size: 13px !important; line-height: 1.55; }
+.audit-body p:not(.audit-summary) { margin-top: 2px; }
+
+/* Ticking specific rows, so naming three people does not mean inventing a filter. */
+.pick-cell { width: 44px; padding: 0 !important; }
+/* The label fills the cell, so the target is the whole cell and not a 23px box. */
+.pick-box { display: grid; place-items: center; min-width: 44px; min-height: 40px; cursor: pointer; }
+.pick-box input { width: 16px; height: 16px; cursor: pointer; }
+.member-row.picked { background: #121a18; }
+.member-row.picked .row-actions { background: #121a18; }
+/* Fixed, so appearing does not push the table down under a click already in flight. */
+.picked-bar { position: fixed; z-index: 90; left: 252px; right: 0; bottom: 0; display: flex; align-items: center; gap: 14px; padding: 12px clamp(24px, 4vw, 64px); border-top: 1px solid #3f624d; background: #101816; box-shadow: 0 -14px 40px rgb(0 0 0 / 55%); }
+.picked-bar strong { color: var(--green); font-size: 13px; }
+.picked-bar .button { min-height: 34px; }
+@media (max-width: 1000px) { .picked-bar { left: 0; } }
+
+/* A page that fails to render says so, instead of going blank like a bad deploy. */
+.page-error { max-width: 720px; padding: 28px; }
+.page-error h2 { margin: 0 0 12px; font: 500 22px Bahnschrift, sans-serif; }
+.page-error p { margin: 0 0 16px; color: var(--muted); font-size: 14px; line-height: 1.6; }
+.page-error pre { margin: 0 0 20px; padding: 12px 14px; overflow: auto; border: 1px solid var(--line); background: #080a0a; color: #e0a9a3; font-size: 12px; }
+
+/* `.modal label` outranked `.depth-custom`, so this field rendered as "CUSTOM". */
+.modal label.depth-custom, .scan-card label.depth-custom { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--muted); }
+/* The evidence drawer is the screen that gets defended to a person; dates should not wrap. */
+.member-drawer .standings-table td:last-child, .member-drawer .standings-table td:nth-last-child(2) { white-space: nowrap; }

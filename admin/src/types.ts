@@ -74,6 +74,7 @@ export type Paginated<T> = { items: T[]; page: number; page_size: number; total:
 export type Action = {
   action_key: string
   discord_user_id: string
+  discord_username?: string
   twitter_handle: string
   action_type: string
   target_handle: string

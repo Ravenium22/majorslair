@@ -6,6 +6,7 @@ import {
   Bot,
   ChartNoAxesColumnIncreasing,
   CircleGauge,
+  LoaderCircle,
   LogOut,
   Menu,
   Coins,
@@ -17,8 +18,9 @@ import {
   X,
 } from 'lucide-react'
 import useSWR from 'swr'
-import { api, formatUsd, mutateApi, type ApiError } from './api'
+import { api, formatDate, formatUsd, mutateApi, type ApiError } from './api'
 import type { Overview, Session } from './types'
+import { PageErrorBoundary } from './components'
 import OverviewPage from './pages/OverviewPage'
 import MembersPage from './pages/MembersPage'
 import PostsPage from './pages/PostsPage'
@@ -147,6 +149,7 @@ function Shell({ session, children }: { session: Session; children: ReactNode })
           })}
         </nav>
         <div className="sidebar-system">
+          {overview?.last_scan?.status === 'running' && <a className="scan-ticker" href="#overview" onClick={(event) => { if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); navigate('overview') }}><LoaderCircle size={15} className="spin" /><span>Scan running<small>{overview.last_scan.period} window · started {formatDate(overview.last_scan.started_at)}</small></span></a>}
           <div><Coins size={16} /><span>{overview ? `${formatUsd(overview.credits_this_month)} this month` : 'Spend this month'}<small>{overview ? `${overview.scans_this_month} scan${overview.scans_this_month === 1 ? '' : 's'} on twitterapi.io` : 'twitterapi.io'}</small></span></div>
           <div><Bot size={16} /><span>Discord bot<small>{overview?.bot_connected ? 'connected' : 'starting up'}</small></span></div>
         </div>
@@ -161,9 +164,11 @@ function Shell({ session, children }: { session: Session; children: ReactNode })
         </div>
       </aside>
       <main className="workspace">
-        <Suspense fallback={<div className="page-loading"><span /> Loading control surface…</div>}>
-          {page}
-        </Suspense>
+        <PageErrorBoundary key={route}>
+          <Suspense fallback={<div className="page-loading"><span /> Loading control surface…</div>}>
+            {page}
+          </Suspense>
+        </PageErrorBoundary>
       </main>
       {children}
     </div>

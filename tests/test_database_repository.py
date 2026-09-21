@@ -440,3 +440,86 @@ async def test_audit_trail_is_searchable_by_member(repository: DatabaseRepositor
     assert by_type["total"] == 1
     assert "engagement_scan" in by_type["event_types"]
     assert "admin_points_adjusted" in by_type["event_types"]
+
+
+@pytest.mark.asyncio
+async def test_ensure_schema_refreshes_rule_descriptions_but_keeps_values(
+    repository: DatabaseRepository,
+) -> None:
+    """Descriptions belong to the code. A database written before an explanation existed
+    must pick it up on the next start, without losing what an admin set."""
+    from sqlalchemy import update
+
+    from majors_lair_bot.orm import ConfigRow
+
+    placeholder = "Editable scoring or scan configuration."
+    async with repository.sessions.begin() as session:
+        await session.execute(update(ConfigRow).values(description=placeholder))
+    await repository.set_config_values({"reply_primary": "9"}, actor_discord_id="42")
+
+    await repository.ensure_schema()
+
+    entries = {entry["key"]: entry for entry in await repository.list_config_entries()}
+    assert not [e for e in entries.values() if e["description"] == placeholder]
+    assert entries["reply_primary"]["value"] == "9"
+    assert entries["reply_primary"]["updated_by"] == "42"
+
+
+@pytest.mark.asyncio
+async def test_actions_sort_orders_and_reject_unknown_values(
+    repository: DatabaseRepository,
+) -> None:
+    from datetime import timedelta
+
+    from majors_lair_bot.orm import ActionRow
+    from majors_lair_bot.utils import utc_now
+
+    now = utc_now()
+    cycle = (await repository.get_config())["current_cycle_id"]
+    await repository.link_user(
+        discord_user_id="1", discord_username="alice", twitter_handle="zzz_a", twitter_user_id="t1"
+    )
+    await repository.link_user(
+        discord_user_id="2", discord_username="bob", twitter_handle="aaa_b", twitter_user_id="t2"
+    )
+    async with repository.sessions.begin() as session:
+        for index, (user_id, handle, points, when) in enumerate(
+            [("1", "zzz_a", 3.0, now - timedelta(days=2)), ("2", "aaa_b", 9.0, now - timedelta(days=1))]
+        ):
+            session.add(
+                ActionRow(
+                    action_key=f"k{index}",
+                    cycle_id=cycle,
+                    discord_user_id=user_id,
+                    twitter_user_id=f"t{user_id}",
+                    twitter_handle=handle,
+                    action_type="reply",
+                    target_handle="major",
+                    source_post_id="p",
+                    action_tweet_id=f"a{index}",
+                    action_url="",
+                    text="hi",
+                    normalized_text="hi",
+                    content_hash=f"h{index}",
+                    has_media=False,
+                    occurred_at=when,
+                    points=points,
+                    reason="r",
+                    active=True,
+                    first_seen_at=now,
+                    last_seen_at=now,
+                )
+            )
+
+    newest = await repository.paginated_actions(sort="occurred_desc")
+    assert [item["discord_username"] for item in newest["items"]] == ["bob", "alice"]
+
+    cheapest = await repository.paginated_actions(sort="points_asc")
+    assert [item["points"] for item in cheapest["items"]] == [3.0, 9.0]
+
+    by_member = await repository.paginated_actions(sort="member")
+    assert [item["twitter_handle"] for item in by_member["items"]] == ["aaa_b", "zzz_a"]
+
+    unknown = await repository.paginated_actions(sort="'; drop table actions; --")
+    assert unknown["sort"] == "occurred_desc"
+    assert [item["discord_username"] for item in unknown["items"]] == ["bob", "alice"]

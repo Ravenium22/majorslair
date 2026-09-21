@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Save, SlidersHorizontal } from 'lucide-react'
 import useSWR from 'swr'
-import { api, mutateApi } from '../api'
+import { api, formatCount, mutateApi } from '../api'
 import { PageHeader, Toast, useEscape } from '../components'
 import type { ConfigEntry, Session } from '../types'
 
@@ -37,8 +37,13 @@ export default function ScoringPage({ session }: { session: Session }) {
     setSaving(true)
     setNotice({ text: 'Validating rules and recalculating the current cycle…', kind: 'loading' })
     try {
-      const result = await mutateApi<{ rescored_actions: number }>('/api/config', session.csrf_token, 'PUT', { values: editable })
-      setNotice({ text: `Rules saved. ${result.rescored_actions} action records rescored.`, kind: 'success' })
+      const result = await mutateApi<{ rescored_actions: number; changed: number }>('/api/config', session.csrf_token, 'PUT', { values: editable })
+      setNotice({
+        text: result.changed === 0
+          ? 'Nothing to save: no rule is different from what is already stored.'
+          : `${result.changed} rule${result.changed === 1 ? '' : 's'} saved. ${formatCount(result.rescored_actions)} action records rescored.`,
+        kind: 'success',
+      })
       setShowSave(false)
       await mutate()
     } catch (error) { setNotice({ text: error instanceof Error ? error.message : 'Save failed', kind: 'error' }) }

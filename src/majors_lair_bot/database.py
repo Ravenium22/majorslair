@@ -33,6 +33,18 @@ from .scoring import CONFIG_DESCRIPTIONS, DEFAULT_CONFIG
 from .utils import isoformat, parse_bool, parse_datetime, utc_now
 
 
+# The sort orders the Activity log offers on its column headers. Anything else falls back
+# to newest first, so a hand-edited query string cannot produce an unordered page.
+ACTION_ORDERS = {
+    "occurred_desc": ActionRow.occurred_at.desc(),
+    "occurred_asc": ActionRow.occurred_at.asc(),
+    "points_desc": ActionRow.points.desc(),
+    "points_asc": ActionRow.points.asc(),
+    "member": ActionRow.twitter_handle.asc(),
+    "type": ActionRow.action_type.asc(),
+}
+
+
 class DatabaseRepositoryError(RuntimeError):
     pass
 
@@ -1138,6 +1150,7 @@ class DatabaseRepository:
         active: bool | None = None,
         search: str = "",
         discord_user_id: str = "",
+        sort: str = "occurred_desc",
         page: int = 1,
         page_size: int = 50,
     ) -> dict[str, Any]:
@@ -1165,17 +1178,27 @@ class DatabaseRepository:
             statement = (
                 select(ActionRow)
                 .where(*filters)
-                .order_by(ActionRow.occurred_at.desc())
+                .order_by(ACTION_ORDERS.get(sort, ACTION_ORDERS["occurred_desc"]))
                 .offset((page - 1) * page_size)
                 .limit(page_size)
             )
             total = int(await session.scalar(count_statement) or 0)
             rows = (await session.scalars(statement)).all()
+            # Every other screen leads with the Discord name; this one used to lead with the
+            # X handle, so the same person read as two different people across the app.
+            names = await self._member_names(session, {row.discord_user_id for row in rows})
         return {
-            "items": [asdict(self._action_from_row(row)) for row in rows],
+            "items": [
+                {
+                    **asdict(self._action_from_row(row)),
+                    "discord_username": names.get(row.discord_user_id, ""),
+                }
+                for row in rows
+            ],
             "page": page,
             "page_size": page_size,
             "total": total,
+            "sort": sort if sort in ACTION_ORDERS else "occurred_desc",
         }
 
     async def paginated_audit(

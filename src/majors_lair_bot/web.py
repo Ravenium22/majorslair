@@ -147,6 +147,9 @@ class RoleBulkRequest(BaseModel):
     action: str = Field(default="add", pattern=r"^(add|remove)$")
     filters: MemberFilters = Field(default_factory=MemberFilters)
     dry_run: bool = False
+    # An explicit list of members, used instead of `filters` when the admin ticked specific
+    # rows. Naming three people should not require building a filter that matches only them.
+    discord_user_ids: list[str] = Field(default_factory=list, max_length=2000)
     # Members who currently hold any of these roles are left alone (checked live).
     exclude_role_ids: list[str] = Field(default_factory=list)
 
@@ -560,8 +563,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/api/users/roles")
     async def bulk_role(payload: RoleBulkRequest, admin: MutatingAdmin) -> dict[str, Any]:
-        """Add or remove one Discord role for every member matching the filters."""
-        members = await _members_matching(payload.filters)
+        """Add or remove one Discord role for the chosen members, or for everyone matching
+        the filters when no explicit list was given."""
+        if payload.discord_user_ids:
+            wanted = {str(value) for value in payload.discord_user_ids}
+            members = [m for m in await _members_matching(MemberFilters()) if m["discord_user_id"] in wanted]
+        else:
+            members = await _members_matching(payload.filters)
         headers = {"Authorization": f"Bot {runtime.settings.discord_token}"}
         guild_id = runtime.settings.discord_guild_id
         excluded_ids = {str(r) for r in payload.exclude_role_ids if str(r).isdigit()}
@@ -1129,6 +1137,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         active: bool | None = None,
         search: str = "",
         discord_user_id: str = "",
+        sort: str = "occurred_desc",
         page: int = 1,
         page_size: int = 50,
     ) -> dict[str, Any]:
@@ -1138,6 +1147,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             active=active,
             search=search,
             discord_user_id=discord_user_id,
+            sort=sort,
             page=page,
             page_size=page_size,
         )
@@ -1213,23 +1223,39 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 status_code=400,
                 detail=f"Unsupported settings: {', '.join(unknown)}",
             )
-        candidate = {**(await runtime.repository.get_config()), **payload.values}
+        current = await runtime.repository.get_config()
+        candidate = {**current, **payload.values}
         try:
             ScoringRules.from_mapping(candidate)
             parse_period(candidate["default_check_period"])
             parse_period(candidate["default_refresh_period"])
         except (KeyError, ValueError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        # The dashboard submits the whole form, so most keys arrive unchanged. Auditing all
+        # of them produced entries claiming 33 settings changed when one did.
+        changed = {
+            key: value
+            for key, value in payload.values.items()
+            if str(current.get(key, "")) != str(value)
+        }
+        if not changed:
+            return {"rescored_actions": 0, "changed": 0}
         await runtime.repository.set_config_values(
-            payload.values, actor_discord_id=str(admin["discord_user_id"])
+            changed, actor_discord_id=str(admin["discord_user_id"])
         )
         count = await runtime.service.rescore_current_cycle(config=candidate)
         await runtime.repository.append_audit(
             event_type="config_updated",
             actor_discord_id=str(admin["discord_user_id"]),
-            details={"keys": sorted(payload.values), "rescored_actions": count},
+            details={
+                "changes": {
+                    key: {"from": current.get(key, ""), "to": value}
+                    for key, value in sorted(changed.items())
+                },
+                "rescored_actions": count,
+            },
         )
-        return {"rescored_actions": count}
+        return {"rescored_actions": count, "changed": len(changed)}
 
     async def run_scan(
         scan_id: str,

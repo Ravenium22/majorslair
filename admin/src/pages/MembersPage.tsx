@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from 'react'
-import { ArrowLeftRight, BadgeCheck, Download, ExternalLink, FileUp, Pencil, Plus, RefreshCw, Search, Shield, ShieldCheck, ShieldOff, Tags, UserRoundCheck, UserRoundX, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
+import { AlertTriangle, ArrowLeftRight, BadgeCheck, Download, ExternalLink, FileUp, Pencil, Plus, RefreshCw, Search, Shield, ShieldCheck, ShieldOff, Tags, UserRoundCheck, UserRoundX, X } from 'lucide-react'
 import useSWR from 'swr'
 import { api, formatCount, formatDate, formatScore, formatUsd, mutateApi } from '../api'
-import { Empty, Loading, PageHeader, Pagination, Toast, useEscape } from '../components'
+import { Empty, Loading, PageHeader, Pagination, SortTh, Toast, useEscape } from '../components'
 import { parseCsv, rowsFromSheet, type ImportRow } from '../csv'
 import type { Action, Adjustment, DiscordRole, DiscordSyncResponse, ImportResponse, ImportStatus, LinkedUser, MemberScanResult, Paginated, RoleBulkResult, Session, VerifyResponse } from '../types'
 
@@ -89,6 +89,10 @@ export default function MembersPage({ session }: { session: Session }) {
   const [roleResult, setRoleResult] = useState<RoleBulkResult>()
   const [roleBusy, setRoleBusy] = useState(false)
   const [excludeRoleIds, setExcludeRoleIds] = useState<string[]>([])
+  const [roleSearch, setRoleSearch] = useState('')
+  // Ticked rows. Naming three people should not mean building a filter that matches
+  // exactly those three, which was the only way to do it before.
+  const [picked, setPicked] = useState<string[]>([])
   // A bulk role change is the most consequential thing on this page, so it starts from a
   // known audience (everyone in the server) rather than silently inheriting whatever the
   // table happens to be filtered to. Ticking the box opts into the page filters.
@@ -250,6 +254,7 @@ export default function MembersPage({ session }: { session: Session }) {
 
   const openMember = (user: LinkedUser) => { setSelected(user); setTool('none'); setMemberScan(undefined) }
 
+  const usingPicked = picked.length > 0
   const roleFilters = () => ({
     search: inheritFilters ? search : '',
     active: !inheritFilters ? true : filter === 'all' ? null : filter === 'active',
@@ -276,18 +281,21 @@ export default function MembersPage({ session }: { session: Session }) {
     : roleMin !== '' ? `on ${roleMin} points or more`
     : roleMax !== '' ? `on ${roleMax} points or fewer` : null
   const audienceClauses = [...(inheritFilters ? pageClauses : []), ...(rangeClause ? [rangeClause] : [])]
-  const audience = audienceClauses.length
-    ? `every member ${audienceClauses.join(', ')}`
-    : 'every member in the server'
+  const audience = usingPicked
+    ? `the ${picked.length} member${picked.length === 1 ? '' : 's'} you ticked`
+    : audienceClauses.length
+      ? `every member ${audienceClauses.join(', ')}`
+      : 'every member in the server'
 
   // Any change to who is targeted invalidates a preview taken before it.
-  useEffect(() => { setRolePreview(undefined) }, [inheritFilters, roleMin, roleMax, roleAction, search, filter, segment, protection, points, lowThreshold, joined])
+  useEffect(() => { setRolePreview(undefined) }, [inheritFilters, roleMin, roleMax, roleAction, picked, search, filter, segment, protection, points, lowThreshold, joined])
 
   const openRoles = async () => {
     setShowRoles(true)
     setRoleResult(undefined)
     setRolePreview(undefined)
     setInheritFilters(false)
+    setRoleSearch('')
     setRoleMin('')
     setRoleMax('')
     try {
@@ -298,9 +306,12 @@ export default function MembersPage({ session }: { session: Session }) {
     } catch (error) { setNotice({ text: error instanceof Error ? error.message : 'Could not load roles', kind: 'error' }) }
   }
 
+  const excluded = roles?.roles.filter((r) => excludeRoleIds.includes(r.id)) ?? []
+  const visibleRoles = (roles?.roles ?? []).filter((r) => r.name.toLowerCase().includes(roleSearch.trim().toLowerCase()))
+
   const previewRoles = async () => {
     setRoleBusy(true)
-    try { setRolePreview(await mutateApi<RoleBulkResult>('/api/users/roles', session.csrf_token, 'POST', { role_id: roleId || '000000', action: roleAction, filters: roleFilters(), dry_run: true, exclude_role_ids: excludeRoleIds })) }
+    try { setRolePreview(await mutateApi<RoleBulkResult>('/api/users/roles', session.csrf_token, 'POST', { role_id: roleId || '000000', action: roleAction, filters: roleFilters(), discord_user_ids: usingPicked ? picked : [], dry_run: true, exclude_role_ids: excludeRoleIds })) }
     catch (error) { setNotice({ text: error instanceof Error ? error.message : 'Preview failed', kind: 'error' }) }
     finally { setRoleBusy(false) }
   }
@@ -309,8 +320,9 @@ export default function MembersPage({ session }: { session: Session }) {
     if (!roleId) { setNotice({ text: 'Pick a role first', kind: 'error' }); return }
     setRoleBusy(true)
     try {
-      const result = await mutateApi<RoleBulkResult>('/api/users/roles', session.csrf_token, 'POST', { role_id: roleId, action: roleAction, filters: roleFilters(), dry_run: false, exclude_role_ids: excludeRoleIds })
+      const result = await mutateApi<RoleBulkResult>('/api/users/roles', session.csrf_token, 'POST', { role_id: roleId, action: roleAction, filters: roleFilters(), discord_user_ids: usingPicked ? picked : [], dry_run: false, exclude_role_ids: excludeRoleIds })
       setRoleResult(result)
+      setPicked([])
       setNotice({ text: `${roleAction === 'add' ? 'Gave' : 'Removed'} the role for ${result.changed?.length ?? 0} of ${result.matched} members${result.failed?.length ? `, ${result.failed.length} failed` : ''}.`, kind: result.failed?.length ? 'error' : 'success' })
     } catch (error) { setNotice({ text: error instanceof Error ? error.message : 'Role update failed', kind: 'error' }) }
     finally { setRoleBusy(false) }
@@ -348,7 +360,22 @@ export default function MembersPage({ session }: { session: Session }) {
     } catch (error) { setNotice({ text: error instanceof Error ? error.message : 'Member scan failed', kind: 'error' }) }
     finally { setMemberScanning(false) }
   }
-  const closeMember = () => { if (saving) return; setSelected(undefined); setTool('none') }
+  // The edit form is uncontrolled, so "has anything changed" is read off the form itself
+  // and compared with the member as loaded. Escape used to throw the work away silently.
+  const editForm = useRef<HTMLFormElement>(null)
+  const [confirmDiscard, setConfirmDiscard] = useState<'drawer' | 'tool'>()
+  const editDirty = () => {
+    const form = editForm.current
+    if (!form || tool !== 'edit' || !selected) return false
+    const data = new FormData(form)
+    return String(data.get('discord_username') ?? '').trim() !== selected.discord_username
+      || String(data.get('twitter_handle') ?? '').trim().replace(/^@/, '') !== (selected.twitter_handle ?? '')
+      || (data.get('special_role') === 'on') !== selected.special_role
+      || String(data.get('special_role_names') ?? '').trim() !== (selected.special_role_names ?? '')
+  }
+  const closeMember = () => { if (saving) return; if (editDirty()) { setConfirmDiscard('drawer'); return } setSelected(undefined); setTool('none') }
+  const closeEditTool = () => { if (saving) return; if (editDirty()) { setConfirmDiscard('tool'); return } setTool('none') }
+  const discardEdit = () => { const where = confirmDiscard; setConfirmDiscard(undefined); if (where === 'drawer') { setSelected(undefined) } setTool('none') }
 
   const saveEdit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -380,7 +407,11 @@ export default function MembersPage({ session }: { session: Session }) {
 
   const anyModal = Boolean(confirmDeactivate || showLink || showImport || showRoles || selected || syncResult || verifyResult || verifyPlan)
   const anyBusy = importing || saving || roleBusy || verifying || memberScanning || syncing || adjusting
-  useEscape(anyModal && !anyBusy, () => { setShowLink(false); setShowImport(false); setShowRoles(false); setSelected(undefined); setTool('none'); setSyncResult(undefined); setVerifyResult(undefined); setVerifyPlan(undefined) })
+  useEscape(anyModal && !anyBusy && !confirmDiscard, () => {
+    if (selected && editDirty()) { setConfirmDiscard('drawer'); return }
+    setShowLink(false); setShowImport(false); setShowRoles(false); setSelected(undefined); setTool('none'); setSyncResult(undefined); setVerifyResult(undefined); setVerifyPlan(undefined)
+  })
+  useEscape(Boolean(confirmDiscard), () => setConfirmDiscard(undefined))
 
   return <div className="page">
     <PageHeader title="Linked members" copy="Everyone in the community, with or without an X account. Protected members never appear in the low-activity report." actions={<button className="button primary" onClick={() => setShowLink(true)}><Plus size={17} /> Link member</button>} toolbar={<>
@@ -392,6 +423,7 @@ export default function MembersPage({ session }: { session: Session }) {
     </>} />
     {notice && <Toast message={notice.text} kind={notice.kind} />}
     <section className="panel">
+      {picked.length > 0 && <div className="picked-bar"><strong>{picked.length} member{picked.length === 1 ? '' : 's'} selected</strong><button className="button" onClick={openRoles}><Tags size={15} /> Give or remove a role</button><button className="link-button" onClick={() => setPicked([])}>Clear selection</button></div>}
       <div className="toolbar filters">
         <label className="search"><Search size={17} /><input value={search} onChange={(e) => { setSearch(e.target.value); setPage(1) }} placeholder="Search Discord handle, X handle, ID, or role" /></label>
         <select value={sort} onChange={(e) => resetPage(setSort)(e.target.value as typeof sort)} aria-label="Sort">{SORTS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select>
@@ -406,11 +438,21 @@ export default function MembersPage({ session }: { session: Session }) {
         <div className="segmented">{['active', 'inactive', 'all'].map((value) => <button className={filter === value ? 'active' : ''} aria-pressed={filter === value} onClick={() => resetPage(setFilter)(value)} key={value}>{value === 'active' ? 'Active' : value === 'inactive' ? 'Inactive' : 'All'}</button>)}</div>
         <span className="filter-count">{data ? `${formatCount(data.total)} member${data.total === 1 ? '' : 's'}` : ''}{hasFilters && <button className="link-button" onClick={clearFilters}>Clear filters</button>}</span>
       </div>
-      <div className="table-wrap"><table><thead><tr><th>Discord</th><th>X identity</th><th>Special role</th><th>Score</th><th>Last signal</th><th>Joined Discord</th><th>Status</th><th aria-label="Actions" /></tr></thead><tbody>
+      <div className="table-wrap"><table><thead><tr>
+        <th className="pick-cell"><label className="pick-box"><input type="checkbox" aria-label="Select every member on this page" checked={Boolean(data?.items.length) && (data?.items ?? []).every((u) => picked.includes(u.discord_user_id))} onChange={(e) => { const ids = (data?.items ?? []).map((u) => u.discord_user_id); setPicked(e.target.checked ? [...new Set([...picked, ...ids])] : picked.filter((id) => !ids.includes(id))) }} /></label></th>
+        <SortTh label="Discord" direction={sort === 'name' ? 'asc' : undefined} onToggle={() => resetPage(setSort)('name')} />
+        <th>X identity</th>
+        <th>Special role</th>
+        <SortTh label="Points" className="score" direction={sort === 'score_desc' ? 'desc' : sort === 'score_asc' ? 'asc' : undefined} onToggle={() => resetPage(setSort)(sort === 'score_desc' ? 'score_asc' : 'score_desc')} />
+        <SortTh label="Last signal" direction={sort === 'last_signal' ? 'desc' : undefined} onToggle={() => resetPage(setSort)('last_signal')} />
+        <SortTh label="Joined Discord" direction={sort === 'joined' ? 'desc' : undefined} onToggle={() => resetPage(setSort)('joined')} />
+        <th>Status</th><th className="row-actions-head" aria-label="Actions" />
+      </tr></thead><tbody>
         {/* The row stays clickable for the mouse, but the keyboard and screen readers get a
             single real link in the name cell. A row that was itself a button, wrapping a
             link and three icon buttons, was invalid nesting and roughly 125 tab stops. */}
-        {data?.items.map((user) => <tr key={user.discord_user_id} className="member-row" onClick={() => openMember(user)}>
+        {data?.items.map((user) => <tr key={user.discord_user_id} className={`member-row ${picked.includes(user.discord_user_id) ? 'picked' : ''}`} onClick={() => openMember(user)}>
+          <td className="pick-cell" onClick={(e) => e.stopPropagation()}><label className="pick-box"><input type="checkbox" checked={picked.includes(user.discord_user_id)} aria-label={`Select ${user.discord_username}`} onChange={(e) => setPicked(e.target.checked ? [...picked, user.discord_user_id] : picked.filter((id) => id !== user.discord_user_id))} /></label></td>
           <td><button type="button" className="member-cell linked-cell" onClick={(e) => { e.stopPropagation(); openMember(user) }}><strong>{user.discord_username}</strong><small className="mono">{user.discord_user_id}</small></button></td>
           <td>{user.twitter_user_id ? <span className="protected-cell"><a href={`https://x.com/${user.twitter_handle}`} target="_blank">@{user.twitter_handle}</a>{(user.x_status === 'suspended' || user.x_status === 'unavailable') && <span className="status failed"><i />X {user.x_status}</span>}</span> : <span className="muted">Not linked</span>}</td>
           <td>{user.special_role ? <span className="protected-cell"><span className="status complete"><i />Protected</span>{user.special_role_names && <small>{user.special_role_names}</small>}</span> : <span className="muted">—</span>}</td>
@@ -419,9 +461,11 @@ export default function MembersPage({ session }: { session: Session }) {
           <td>{user.discord_joined_at ? <span className="protected-cell">{formatDate(user.discord_joined_at)}<small>{daysAgo(user.discord_joined_at)} days ago</small></span> : <span className="muted" title="Run Sync from Discord to fill join dates">—</span>}</td>
           <td><span className={`status ${user.active ? 'complete' : 'failed'}`}><i />{user.active ? 'Active' : 'Inactive'}</span></td>
           <td className="row-actions" onClick={(e) => e.stopPropagation()}>
-            <button className="icon-button" title="Open member: history and edit" onClick={() => { openMember(user); setTool('edit') }}><Pencil size={17} /></button>
-            <button className="icon-button" title={user.special_role ? 'Remove protection' : 'Protect from low-activity report'} onClick={() => toggleProtected(user)}>{user.special_role ? <ShieldOff size={18} /> : <Shield size={18} />}</button>
-            <button className="icon-button" title={user.active ? 'Deactivate' : 'Reactivate'} onClick={() => toggleActive(user)}>{user.active ? <UserRoundX size={18} /> : <UserRoundCheck size={18} />}</button>
+            <button className="icon-button" title="Edit this member" aria-label={`Edit ${user.discord_username}`} onClick={() => { openMember(user); setTool('edit') }}><Pencil size={17} /></button>
+            {/* Shield and ShieldOff differ by one diagonal stroke, and one of these buttons
+                takes a member out of the removal list. The state is named, not drawn. */}
+            <button className={`icon-button labelled ${user.special_role ? 'on' : ''}`} title={user.special_role ? 'Protected from the low-activity report. Click to remove protection.' : 'Not protected. Click to protect from the low-activity report.'} aria-pressed={user.special_role} aria-label={`${user.special_role ? 'Remove protection from' : 'Protect'} ${user.discord_username}`} onClick={() => toggleProtected(user)}>{user.special_role ? <ShieldCheck size={17} /> : <Shield size={17} />}<span>{user.special_role ? 'Protected' : 'Protect'}</span></button>
+            <button className="icon-button" title={user.active ? 'Deactivate this member' : 'Reactivate this member'} aria-label={`${user.active ? 'Deactivate' : 'Reactivate'} ${user.discord_username}`} onClick={() => toggleActive(user)}>{user.active ? <UserRoundX size={18} /> : <UserRoundCheck size={18} />}</button>
           </td>
         </tr>)}
       </tbody></table></div>
@@ -429,6 +473,12 @@ export default function MembersPage({ session }: { session: Session }) {
       {!isLoading && !data?.items.length && <Empty title="No matching members" copy="Change the filters, sync from Discord, or import the community sheet." />}
       <Pagination page={page} size={25} total={data?.total ?? 0} onChange={setPage} />
     </section>
+
+    {confirmDiscard && <div className="modal-backdrop stacked" onMouseDown={() => setConfirmDiscard(undefined)}><div className="modal modal-narrow" onMouseDown={(e) => e.stopPropagation()}>
+      <div className="modal-icon danger-icon"><AlertTriangle /></div><h2>Discard your changes?</h2>
+      <p>You have edits to {selected?.discord_username} that have not been saved. Closing now throws them away.</p>
+      <div className="modal-actions"><button className="button ghost" onClick={() => setConfirmDiscard(undefined)}>Keep editing</button><button className="button danger" onClick={discardEdit}>Discard</button></div>
+    </div></div>}
 
     {selected && <div className="modal-backdrop" onMouseDown={closeMember}><div className="modal modal-wide member-drawer" onMouseDown={(e) => e.stopPropagation()}>
       <button className="icon-button drawer-close" onClick={closeMember} aria-label="Close"><X size={18} /></button>
@@ -444,16 +494,16 @@ export default function MembersPage({ session }: { session: Session }) {
         {selected.handle_history && <span className="muted">previous X: {selected.handle_history.split('|').map((h) => `@${h}`).join(', ')}</span>}
       </div>
       <div className="drawer-tools">
-        <button type="button" className={`button ${tool === 'edit' ? 'primary' : ''}`} onClick={() => setTool(tool === 'edit' ? 'none' : 'edit')}><Pencil size={15} /> Edit member</button>
-        <button type="button" className={`button ${tool === 'points' ? 'primary' : ''}`} onClick={() => setTool(tool === 'points' ? 'none' : 'points')}><ArrowLeftRight size={15} /> Points</button>
+        <button type="button" className={`button ${tool === 'edit' ? 'primary' : ''}`} onClick={() => (tool === 'edit' ? closeEditTool() : setTool('edit'))}><Pencil size={15} /> Edit member</button>
+        <button type="button" className={`button ${tool === 'points' ? 'primary' : ''}`} onClick={() => { if (tool === 'edit' && editDirty()) { setConfirmDiscard('tool'); return } setTool(tool === 'points' ? 'none' : 'points') }}><ArrowLeftRight size={15} /> Points</button>
         {selected.twitter_user_id && <button type="button" className={`button ${tool === 'scan' ? 'primary' : ''}`} onClick={() => setTool(tool === 'scan' ? 'none' : 'scan')}><BadgeCheck size={15} /> Scan this member</button>}
       </div>
-      {tool === 'edit' && <form className="edit-grid" onSubmit={saveEdit}>
+      {tool === 'edit' && <form className="edit-grid" ref={editForm} onSubmit={saveEdit}>
         <label>Discord handle<input name="discord_username" defaultValue={selected.discord_username} required maxLength={120} /></label>
         <label>X handle<input name="twitter_handle" defaultValue={selected.twitter_handle} placeholder="handle (verified on save)" /></label>
         <label className="check-row"><input type="checkbox" name="special_role" defaultChecked={selected.special_role} /> Protected (never in the low-activity report)</label>
         <label>Special role names<input name="special_role_names" defaultValue={selected.special_role_names} placeholder="Builder, Friend" /></label>
-        <div className="modal-actions"><button type="button" className="button ghost" onClick={() => setTool('none')} disabled={saving}>Cancel</button><button className="button primary" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button></div>
+        <div className="modal-actions"><button type="button" className="button ghost" onClick={closeEditTool} disabled={saving}>Cancel</button><button className="button primary" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button></div>
       </form>}
       {tool === 'points' && <div className="member-scan adjust-panel">
         <div><h3 className="sub-heading"><ArrowLeftRight size={13} /> Points: add, remove or transfer</h3><p className="muted small">Manual adjustments are kept separately from scanned actions, so scans and rescoring never undo them. Every one is logged in the Audit trail with who did it and why.</p></div>
@@ -496,11 +546,22 @@ export default function MembersPage({ session }: { session: Session }) {
         <label>Min points<input type="number" step="1" value={roleMin} onChange={(e) => setRoleMin(e.target.value)} placeholder="any" disabled={roleBusy} /></label>
         <label>Max points<input type="number" step="1" value={roleMax} onChange={(e) => setRoleMax(e.target.value)} placeholder="any" disabled={roleBusy} /></label>
       </div>
-      <label className="exclude-roles">Leave alone anyone who currently has any of these roles (checked live at the moment you apply)<select multiple size={4} value={excludeRoleIds} onChange={(e) => setExcludeRoleIds([...e.target.selectedOptions].map((o) => o.value))} disabled={roleBusy}>{roles?.roles.map((r) => <option key={r.id} value={r.id}>{r.name}{r.booster ? ' (Server Booster)' : ''}</option>)}</select><small className="field-hint">Server Booster is preselected. Hold Ctrl (Cmd on Mac) to pick several.</small></label>
-      {pageClauses.length > 0 && <label className="role-inherit"><input type="checkbox" checked={inheritFilters} onChange={(e) => setInheritFilters(e.target.checked)} disabled={roleBusy} /><span>Narrow this to the filters set on the Members page<small>{pageClauses.join(', ')}</small></span></label>}
+      {/* This was a native multi-select holding every role in the server, with "hold Ctrl"
+          as the instruction. Roles are now chips you can read and a list you can filter. */}
+      <fieldset className="exclude-roles" disabled={roleBusy}>
+        <legend>Leave alone anyone who has one of these roles</legend>
+        <p className="field-hint">Checked live at the moment you apply, so a role given after the preview still counts. Server Booster is on by default.</p>
+        {excluded.length > 0 && <ul className="role-chips">{excluded.map((r) => <li key={r.id}><button type="button" onClick={() => setExcludeRoleIds(excludeRoleIds.filter((id) => id !== r.id))} aria-label={`Stop protecting ${r.name}`}>{r.name}{r.booster && !/boost/i.test(r.name) ? ' · booster' : ''}<X size={13} /></button></li>)}</ul>}
+        <label className="role-search"><Search size={15} /><input value={roleSearch} onChange={(e) => setRoleSearch(e.target.value)} placeholder={`Search ${roles?.roles.length ?? 0} roles`} /></label>
+        <div className="role-options" role="group" aria-label="Roles to leave alone">
+          {visibleRoles.map((r) => <label key={r.id}><input type="checkbox" checked={excludeRoleIds.includes(r.id)} onChange={(e) => setExcludeRoleIds(e.target.checked ? [...excludeRoleIds, r.id] : excludeRoleIds.filter((id) => id !== r.id))} /><span>{r.name}{r.booster && !/boost/i.test(r.name) ? <em>Server Booster</em> : null}</span></label>)}
+          {visibleRoles.length === 0 && <p className="field-hint">No role matches that.</p>}
+        </div>
+      </fieldset>
+      {!usingPicked && pageClauses.length > 0 && <label className="role-inherit"><input type="checkbox" checked={inheritFilters} onChange={(e) => setInheritFilters(e.target.checked)} disabled={roleBusy} /><span>Narrow this to the filters set on the Members page<small>{pageClauses.join(', ')}</small></span></label>}
       {rolePreview && !roleResult && <><p className="import-summary"><strong>{rolePreview.matched}</strong> members match{rolePreview.skipped?.length ? <> · <strong>{rolePreview.skipped.length}</strong> left alone because of their roles ({rolePreview.skipped.slice(0, 6).map((s) => s.discord_username).join(', ')}{rolePreview.skipped.length > 6 ? '…' : ''})</> : null}. {rolePreview.matched > 500 ? 'Showing the first 500.' : ''}</p><div className="table-wrap import-results"><table><tbody>{rolePreview.members?.map((m) => <tr key={m.discord_user_id}><td><span className="member-cell"><strong>{m.discord_username}</strong><small className="mono">{m.discord_user_id}</small></span></td><td className="score">{formatScore(m.score)}</td><td>{m.special_role ? <span className="status complete"><i />Protected</span> : ''}</td></tr>)}</tbody></table></div></>}
       {roleResult && <><p className="import-summary">{roleAction === 'add' ? 'Gave' : 'Removed'} the role for <strong>{roleResult.changed?.length ?? 0}</strong> of {roleResult.matched} members{roleResult.failed?.length ? ` · ${roleResult.failed.length} failed` : ''}{roleResult.skipped?.length ? ` · ${roleResult.skipped.length} left alone because of their roles` : ''}.</p>{roleResult.skipped && roleResult.skipped.length > 0 && <div className="table-wrap import-results"><table><tbody>{roleResult.skipped.map((s) => <tr key={s.discord_user_id}><td><span className="member-cell"><strong>{s.discord_username}</strong><small className="mono">{s.discord_user_id}</small></span></td><td className="muted">{s.roles}</td></tr>)}</tbody></table></div>}{roleResult.failed && roleResult.failed.length > 0 && <div className="table-wrap import-results"><table><tbody>{roleResult.failed.map((f) => <tr key={f.discord_user_id}><td><span className="member-cell"><strong>{f.discord_username}</strong><small className="mono">{f.discord_user_id}</small></span></td><td className="muted">{f.error}</td></tr>)}</tbody></table></div>}</>}
-      <div className="modal-actions"><button type="button" className="button ghost" onClick={() => setShowRoles(false)} disabled={roleBusy}>{roleResult ? 'Done' : 'Cancel'}</button>{!roleResult && <button type="button" className="button" onClick={previewRoles} disabled={roleBusy}>{roleBusy ? 'Working…' : 'Preview who matches'}</button>}{!roleResult && <button type="button" className="button primary" onClick={applyRoles} disabled={roleBusy || !roleId || !rolePreview} title={!rolePreview ? 'Preview first' : undefined}>{roleBusy ? 'Working…' : !rolePreview ? 'Preview first' : roleAction === 'add' ? `Give role to ${rolePreview.matched} members` : `Remove role from ${rolePreview.matched} members`}</button>}</div>
+      <div className="modal-actions"><button type="button" className="button ghost" onClick={() => setShowRoles(false)} disabled={roleBusy}>{roleResult ? 'Done' : 'Cancel'}</button>{!roleResult && <button type="button" className="button" onClick={previewRoles} disabled={roleBusy}>{roleBusy ? 'Working…' : 'Preview who matches'}</button>}{!roleResult && <button type="button" className="button primary" onClick={applyRoles} disabled={roleBusy || !roleId || !rolePreview} title={!rolePreview ? 'Run the preview first so you can see exactly who this hits' : undefined}>{roleBusy ? 'Working…' : !rolePreview ? (roleAction === 'add' ? 'Give the role' : 'Remove the role') : roleAction === 'add' ? `Give the role to ${rolePreview.matched} members` : `Remove the role from ${rolePreview.matched} members`}</button>}</div>
     </div></div>}
 
     {showLink && <div className="modal-backdrop" onMouseDown={() => setShowLink(false)}><form className="modal" onSubmit={link} onMouseDown={(e) => e.stopPropagation()}><div className="modal-icon"><ShieldCheck /></div><h2>Link a member</h2><p>Use the Discord username (the handle shown in the profile, not the nickname). The X handle is resolved through twitterapi.io and its stable account ID is stored.</p><label>Discord user ID<input required name="discord_user_id" pattern="\d+" inputMode="numeric" placeholder="123456789012345678" disabled={linking} /><small className="field-hint">Discord → User Settings → Advanced → Developer Mode on, then right-click the member → Copy User ID.</small></label><label>Discord handle<input required name="discord_username" placeholder="luna.luna12" autoCapitalize="none" spellCheck={false} disabled={linking} /></label><label>X handle<input required name="twitter_handle" placeholder="@handle" autoCapitalize="none" spellCheck={false} disabled={linking} /></label><div className="modal-actions"><button type="button" className="button ghost" onClick={() => setShowLink(false)} disabled={linking}>Cancel</button><button className="button primary" disabled={linking}>{linking ? 'Verifying on X…' : 'Verify & link'}</button></div></form></div>}

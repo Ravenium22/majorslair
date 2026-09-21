@@ -1,5 +1,5 @@
-import { useEffect, useState, type ReactNode } from 'react'
-import { AlertCircle, Check, LoaderCircle, X } from 'lucide-react'
+import { Component, useEffect, useState, type ErrorInfo, type ReactNode } from 'react'
+import { AlertCircle, Check, ChevronDown, ChevronUp, ChevronsUpDown, LoaderCircle, X } from 'lucide-react'
 import { formatCount } from './api'
 
 /** Close something with the Escape key while it is open. */
@@ -76,4 +76,69 @@ export function Pagination({ page, size, total, onChange }: { page: number; size
       {pages > 1 && <div><button disabled={page <= 1} onClick={() => onChange(page - 1)}>Previous</button><span>{page} / {pages}</span><button disabled={page >= pages} onClick={() => onChange(page + 1)}>Next</button>{pages > 2 && <label className="page-jump">Go to<input type="number" min={1} max={pages} defaultValue={page} key={page} onKeyDown={(e) => { if (e.key === 'Enter') { const value = Math.min(pages, Math.max(1, Number((e.target as HTMLInputElement).value) || 1)); onChange(value) } }} onBlur={(e) => { const value = Math.min(pages, Math.max(1, Number(e.target.value) || 1)); if (value !== page) onChange(value) }} /></label>}</div>}
     </div>
   )
+}
+
+
+/** A column header you can sort by. `direction` is undefined when this column is not the
+ *  one in use, so the control still shows that sorting is available. */
+export function SortTh({ label, direction, onToggle, className }: {
+  label: string
+  direction?: 'asc' | 'desc'
+  onToggle: () => void
+  className?: string
+}) {
+  return (
+    <th
+      className={`${className ?? ''} sortable`.trim()}
+      aria-sort={direction === 'asc' ? 'ascending' : direction === 'desc' ? 'descending' : 'none'}
+    >
+      <button type="button" className={direction ? 'th-sort active' : 'th-sort'} onClick={onToggle}>
+        {label}
+        {direction === 'asc' ? <ChevronUp size={13} /> : direction === 'desc' ? <ChevronDown size={13} /> : <ChevronsUpDown size={13} className="th-sort-idle" />}
+      </button>
+    </th>
+  )
+}
+
+
+/** One render error used to blank the whole dashboard, which is indistinguishable from a
+ *  failed deploy. Show what broke and offer a way back instead. */
+export class PageErrorBoundary extends Component<
+  { children: ReactNode; onReset?: () => void },
+  { error: Error | null }
+> {
+  state: { error: Error | null } = { error: null }
+
+  static getDerivedStateFromError(error: Error) {
+    return { error }
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error('Dashboard render failed', error, info.componentStack)
+  }
+
+  render() {
+    if (!this.state.error) return this.props.children
+    return (
+      <div className="page">
+        <div className="panel page-error">
+          <h2>This page could not be drawn</h2>
+          <p>
+            Something in the data the server returned was not the shape this page expects.
+            Nothing has been changed. Reloading usually clears it; if it keeps happening, the
+            message below is what to report.
+          </p>
+          <pre>{this.state.error.message}</pre>
+          <div className="modal-actions left">
+            <button className="button" onClick={() => { this.setState({ error: null }); this.props.onReset?.() }}>
+              Try this page again
+            </button>
+            <button className="button primary" onClick={() => window.location.reload()}>
+              Reload the dashboard
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
 }
