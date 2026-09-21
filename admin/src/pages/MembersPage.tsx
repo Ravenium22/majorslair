@@ -1,4 +1,4 @@
-import { useMemo, useState, type ChangeEvent, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from 'react'
 import { ArrowLeftRight, BadgeCheck, Download, ExternalLink, FileUp, Pencil, Plus, RefreshCw, Search, Shield, ShieldCheck, ShieldOff, Tags, UserRoundCheck, UserRoundX, X } from 'lucide-react'
 import useSWR from 'swr'
 import { api, formatDate, formatScore, mutateApi } from '../api'
@@ -41,15 +41,18 @@ const SORTS = [
   { id: 'joined', label: 'Joined Discord: newest' },
 ] as const
 
+const hashParams = () => new URLSearchParams(window.location.hash.split('?')[1] ?? '')
+
 export default function MembersPage({ session }: { session: Session }) {
-  const [search, setSearch] = useState('')
-  const [filter, setFilter] = useState('active')
-  const [segment, setSegment] = useState<(typeof SEGMENTS)[number]['id']>('everyone')
-  const [protection, setProtection] = useState<(typeof PROTECTION)[number]['id']>('any')
-  const [points, setPoints] = useState<(typeof POINTS)[number]['id']>('any')
-  const [lowThreshold, setLowThreshold] = useState('')
-  const [joined, setJoined] = useState<(typeof JOINED)[number]['id']>('any')
-  const [sort, setSort] = useState<(typeof SORTS)[number]['id']>('score_desc')
+  const initial = useMemo(hashParams, [])
+  const [search, setSearch] = useState(() => initial.get('search') ?? '')
+  const [filter, setFilter] = useState(() => initial.get('active') ?? 'active')
+  const [segment, setSegment] = useState<(typeof SEGMENTS)[number]['id']>(() => (SEGMENTS.find((s) => s.id === initial.get('view'))?.id ?? 'everyone'))
+  const [protection, setProtection] = useState<(typeof PROTECTION)[number]['id']>(() => (PROTECTION.find((s) => s.id === initial.get('role'))?.id ?? 'any'))
+  const [points, setPoints] = useState<(typeof POINTS)[number]['id']>(() => (POINTS.find((s) => s.id === initial.get('points'))?.id ?? 'any'))
+  const [lowThreshold, setLowThreshold] = useState(() => initial.get('threshold') ?? '')
+  const [joined, setJoined] = useState<(typeof JOINED)[number]['id']>(() => (JOINED.find((s) => s.id === initial.get('joined'))?.id ?? 'any'))
+  const [sort, setSort] = useState<(typeof SORTS)[number]['id']>(() => (SORTS.find((s) => s.id === initial.get('sort'))?.id ?? 'score_desc'))
   const [page, setPage] = useState(1)
   const [showLink, setShowLink] = useState(false)
   const [showImport, setShowImport] = useState(false)
@@ -97,6 +100,22 @@ export default function MembersPage({ session }: { session: Session }) {
     ...(sort !== 'score_desc' ? { sort } : {}),
   }).toString(), [search, filter, segment, protection, points, lowThreshold, joined, sort])
   const query = `${filterQuery}&page=${page}&page_size=25`
+  // Mirror the filters into the address bar so a reload, a bookmark or a pasted link
+  // reopens the same view.
+  useEffect(() => {
+    const params = new URLSearchParams()
+    if (search) params.set('search', search)
+    if (filter !== 'active') params.set('active', filter)
+    if (segment !== 'everyone') params.set('view', segment)
+    if (protection !== 'any') params.set('role', protection)
+    if (points !== 'any') params.set('points', points)
+    if (points === 'low' && lowThreshold) params.set('threshold', lowThreshold)
+    if (joined !== 'any') params.set('joined', joined)
+    if (sort !== 'score_desc') params.set('sort', sort)
+    const next = params.toString()
+    const target = `#members${next ? `?${next}` : ''}`
+    if (window.location.hash !== target) window.history.replaceState(null, '', target)
+  }, [search, filter, segment, protection, points, lowThreshold, joined, sort])
   const { data, mutate, isLoading } = useSWR<Paginated<LinkedUser>>(`/api/users?${query}`, api)
   const resetPage = <T,>(setter: (value: T) => void) => (value: T) => { setter(value); setPage(1) }
   const hasFilters = Boolean(search) || filter !== 'active' || segment !== 'everyone' || protection !== 'any' || points !== 'any' || joined !== 'any'
@@ -307,7 +326,7 @@ export default function MembersPage({ session }: { session: Session }) {
   useEscape(anyModal && !anyBusy, () => { setShowLink(false); setShowImport(false); setShowRoles(false); setSelected(undefined); setTool('none'); setSyncResult(undefined); setVerifyResult(undefined); setVerifyPlan(undefined) })
 
   return <div className="page">
-    <PageHeader eyebrow="Community registry" title="Linked members" copy="Everyone in the community, with or without an X account. Protected members never appear in the low-activity report." actions={<button className="button primary" onClick={() => setShowLink(true)}><Plus size={17} /> Link member</button>} toolbar={<>
+    <PageHeader title="Linked members" copy="Everyone in the community, with or without an X account. Protected members never appear in the low-activity report." actions={<button className="button primary" onClick={() => setShowLink(true)}><Plus size={17} /> Link member</button>} toolbar={<>
       <button className="button" onClick={openVerify} disabled={verifying} title="Check linked X accounts for suspensions, deletions, and renames (about 10 credits each)"><BadgeCheck size={17} className={verifying ? 'spin' : ''} /> {verifying ? 'Checking X…' : 'Verify X accounts'}</button>
       <button className="button" onClick={runSync} disabled={syncing} title="Register every human member of the Discord server who is missing here"><RefreshCw size={17} className={syncing ? 'spin' : ''} /> {syncing ? 'Syncing…' : 'Sync from Discord'}</button>
       <button className="button" onClick={openRoles}><Tags size={17} /> Give role</button>
@@ -321,16 +340,16 @@ export default function MembersPage({ session }: { session: Session }) {
         <select value={sort} onChange={(e) => resetPage(setSort)(e.target.value as typeof sort)} aria-label="Sort">{SORTS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select>
       </div>
       <div className="toolbar filters wrap">
-        <div className="segmented">{SEGMENTS.map((item) => <button className={segment === item.id ? 'active' : ''} onClick={() => resetPage(setSegment)(item.id)} key={item.id}>{item.label}</button>)}</div>
-        <div className="segmented">{PROTECTION.map((item) => <button className={protection === item.id ? 'active' : ''} onClick={() => resetPage(setProtection)(item.id)} key={item.id}>{item.label}</button>)}</div>
-        <div className="segmented">{POINTS.map((item) => <button className={points === item.id ? 'active' : ''} onClick={() => resetPage(setPoints)(item.id)} key={item.id} title={item.id === 'low' ? 'At or below the low-activity threshold from Scoring rules, or the number you type next to it' : undefined}>{item.label}</button>)}</div>
+        <div className="segmented">{SEGMENTS.map((item) => <button className={segment === item.id ? 'active' : ''} aria-pressed={segment === item.id} onClick={() => resetPage(setSegment)(item.id)} key={item.id}>{item.label}</button>)}</div>
+        <div className="segmented">{PROTECTION.map((item) => <button className={protection === item.id ? 'active' : ''} aria-pressed={protection === item.id} onClick={() => resetPage(setProtection)(item.id)} key={item.id}>{item.label}</button>)}</div>
+        <div className="segmented">{POINTS.map((item) => <button className={points === item.id ? 'active' : ''} aria-pressed={points === item.id} onClick={() => resetPage(setPoints)(item.id)} key={item.id} title={item.id === 'low' ? 'At or below the low-activity threshold from Scoring rules, or the number you type next to it' : undefined}>{item.label}</button>)}</div>
         {points === 'low' && <label className="threshold-box">≤<input type="number" min={0} step={1} inputMode="numeric" placeholder="pts" value={lowThreshold} onChange={(e) => { const v = e.target.value.replace(/[^0-9]/g, ''); setLowThreshold(v); setPage(1) }} title="Points at or below this count as low activity for this view. Empty = the threshold from Scoring rules." /><span className="muted small">pts{lowThreshold === '' ? ' (setting)' : ''}</span></label>}
-        <div className="segmented">{JOINED.map((item) => <button className={joined === item.id ? 'active' : ''} onClick={() => resetPage(setJoined)(item.id)} key={item.id} title={item.id === 'new' ? 'Joined Discord within the grace period (newcomer_grace_days in Scoring rules); never in the low-activity report' : item.id === 'established' ? 'Joined before the grace period, or join date unknown' : undefined}>{item.label}</button>)}</div>
-        <div className="segmented">{['active', 'inactive', 'all'].map((value) => <button className={filter === value ? 'active' : ''} onClick={() => resetPage(setFilter)(value)} key={value}>{value}</button>)}</div>
+        <div className="segmented">{JOINED.map((item) => <button className={joined === item.id ? 'active' : ''} aria-pressed={joined === item.id} onClick={() => resetPage(setJoined)(item.id)} key={item.id} title={item.id === 'new' ? 'Joined Discord within the grace period (newcomer_grace_days in Scoring rules); never in the low-activity report' : item.id === 'established' ? 'Joined before the grace period, or join date unknown' : undefined}>{item.label}</button>)}</div>
+        <div className="segmented">{['active', 'inactive', 'all'].map((value) => <button className={filter === value ? 'active' : ''} aria-pressed={filter === value} onClick={() => resetPage(setFilter)(value)} key={value}>{value === 'active' ? 'Active' : value === 'inactive' ? 'Inactive' : 'All'}</button>)}</div>
         <span className="filter-count">{data ? `${data.total.toLocaleString()} member${data.total === 1 ? '' : 's'}` : ''}{hasFilters && <button className="link-button" onClick={clearFilters}>Clear filters</button>}</span>
       </div>
       <div className="table-wrap"><table><thead><tr><th>Discord</th><th>X identity</th><th>Special role</th><th>Score</th><th>Last signal</th><th>Joined Discord</th><th>Status</th><th aria-label="Actions" /></tr></thead><tbody>
-        {data?.items.map((user) => <tr key={user.discord_user_id} className="member-row" onClick={() => openMember(user)}>
+        {data?.items.map((user) => <tr key={user.discord_user_id} className="member-row" tabIndex={0} role="button" aria-label={`Open ${user.discord_username}`} onClick={() => openMember(user)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openMember(user) } }}>
           <td><span className="member-cell"><strong>{user.discord_username}</strong><small className="mono">{user.discord_user_id}</small></span></td>
           <td>{user.twitter_user_id ? <span className="protected-cell"><a href={`https://x.com/${user.twitter_handle}`} target="_blank">@{user.twitter_handle}</a>{(user.x_status === 'suspended' || user.x_status === 'unavailable') && <span className="status failed"><i />X {user.x_status}</span>}</span> : <span className="muted">Not linked</span>}</td>
           <td>{user.special_role ? <span className="protected-cell"><span className="status complete"><i />Protected</span>{user.special_role_names && <small>{user.special_role_names}</small>}</span> : <span className="muted">—</span>}</td>
@@ -407,7 +426,7 @@ export default function MembersPage({ session }: { session: Session }) {
     </div></div>}
 
     {showRoles && <div className="modal-backdrop" onMouseDown={() => { if (!roleBusy) setShowRoles(false) }}><div className="modal modal-wide" onMouseDown={(e) => e.stopPropagation()}>
-      <div className="modal-icon"><Tags /></div><p className="eyebrow">Discord roles</p><h2>Give or remove a role in bulk</h2>
+      <div className="modal-icon"><Tags /></div><h2>Give or remove a role in bulk</h2>
       <p>Applies to the members matching the <strong>filters currently set on this page</strong> (search, X state, protection, points, join date, active), optionally narrowed by a points range below. Preview first, then apply. Every run is logged in the Audit trail.</p>
       {roles && !roles.bot_can_manage_roles && <p className="estimate-warning">The bot has no <strong>Manage Roles</strong> permission in Discord. Server Settings → Roles → the bot's role → enable Manage Roles, and drag the bot's role above the roles you want it to give.</p>}
       <div className="role-grid">
@@ -423,10 +442,10 @@ export default function MembersPage({ session }: { session: Session }) {
       <div className="modal-actions"><button type="button" className="button ghost" onClick={() => setShowRoles(false)} disabled={roleBusy}>{roleResult ? 'Done' : 'Cancel'}</button>{!roleResult && <button type="button" className="button" onClick={previewRoles} disabled={roleBusy}>{roleBusy ? 'Working…' : 'Preview who matches'}</button>}{!roleResult && <button type="button" className="button primary" onClick={applyRoles} disabled={roleBusy || !roleId || !rolePreview} title={!rolePreview ? 'Preview first' : undefined}>{roleBusy ? 'Working…' : !rolePreview ? 'Preview first' : roleAction === 'add' ? `Give role to ${rolePreview.matched} members` : `Remove role from ${rolePreview.matched} members`}</button>}</div>
     </div></div>}
 
-    {showLink && <div className="modal-backdrop" onMouseDown={() => setShowLink(false)}><form className="modal" onSubmit={link} onMouseDown={(e) => e.stopPropagation()}><div className="modal-icon"><ShieldCheck /></div><p className="eyebrow">Verified identity</p><h2>Link a member</h2><p>Use the Discord username (the handle shown in the profile, not the nickname). The X handle is resolved through twitterapi.io and its stable account ID is stored.</p><label>Discord user ID<input required name="discord_user_id" pattern="\d+" inputMode="numeric" placeholder="123456789012345678" disabled={linking} /><small className="field-hint">Discord → User Settings → Advanced → Developer Mode on, then right-click the member → Copy User ID.</small></label><label>Discord handle<input required name="discord_username" placeholder="luna.luna12" autoCapitalize="none" spellCheck={false} disabled={linking} /></label><label>X handle<input required name="twitter_handle" placeholder="@handle" autoCapitalize="none" spellCheck={false} disabled={linking} /></label><div className="modal-actions"><button type="button" className="button ghost" onClick={() => setShowLink(false)} disabled={linking}>Cancel</button><button className="button primary" disabled={linking}>{linking ? 'Verifying on X…' : 'Verify & link'}</button></div></form></div>}
+    {showLink && <div className="modal-backdrop" onMouseDown={() => setShowLink(false)}><form className="modal" onSubmit={link} onMouseDown={(e) => e.stopPropagation()}><div className="modal-icon"><ShieldCheck /></div><h2>Link a member</h2><p>Use the Discord username (the handle shown in the profile, not the nickname). The X handle is resolved through twitterapi.io and its stable account ID is stored.</p><label>Discord user ID<input required name="discord_user_id" pattern="\d+" inputMode="numeric" placeholder="123456789012345678" disabled={linking} /><small className="field-hint">Discord → User Settings → Advanced → Developer Mode on, then right-click the member → Copy User ID.</small></label><label>Discord handle<input required name="discord_username" placeholder="luna.luna12" autoCapitalize="none" spellCheck={false} disabled={linking} /></label><label>X handle<input required name="twitter_handle" placeholder="@handle" autoCapitalize="none" spellCheck={false} disabled={linking} /></label><div className="modal-actions"><button type="button" className="button ghost" onClick={() => setShowLink(false)} disabled={linking}>Cancel</button><button className="button primary" disabled={linking}>{linking ? 'Verifying on X…' : 'Verify & link'}</button></div></form></div>}
 
     {showImport && <div className="modal-backdrop" onMouseDown={closeImport}><div className="modal modal-wide" onMouseDown={(e) => e.stopPropagation()}>
-      <div className="modal-icon"><FileUp /></div><p className="eyebrow">Bulk registry</p><h2>Import members from a spreadsheet</h2>
+      <div className="modal-icon"><FileUp /></div><h2>Import members from a spreadsheet</h2>
       {!importResult && <>
         <p>Export the sheet as CSV. The first row must contain a <code>discord_id</code> column. Optional columns: <code>discord_username</code> (the Discord handle), <code>x_handle</code>, <code>SPECIAL ROLE</code> (YES/NO) and <code>SPECIAL ROLE NAMES</code>. Everyone in the sheet is registered; handles are verified through twitterapi.io (about 18 credits each) and members already linked to the same handle are left untouched. Re-importing is safe.</p>
         <label>CSV file<input type="file" accept=".csv,text/csv" onChange={pickFile} disabled={importing} /></label>
@@ -443,7 +462,7 @@ export default function MembersPage({ session }: { session: Session }) {
     </div></div>}
 
     {verifyPlan && <div className="modal-backdrop" onMouseDown={() => { if (!verifying) setVerifyPlan(undefined) }}><div className="modal" onMouseDown={(e) => e.stopPropagation()}>
-      <div className="modal-icon"><BadgeCheck /></div><p className="eyebrow">X verification</p><h2>Check linked X accounts</h2>
+      <div className="modal-icon"><BadgeCheck /></div><h2>Check linked X accounts</h2>
       <p>Each account is looked up on X by its stable ID. Suspended or deleted accounts get flagged, renamed accounts get their handle updated. About 10 twitterapi.io credits per account.</p>
       <label className="check-row"><input type="checkbox" checked={skipProtected} onChange={(e) => setSkipProtected(e.target.checked)} disabled={verifying} /> Skip protected members ({verifyPlan.protectedLinked} linked)</label>
       <p className="import-summary">Will check <strong>{verifyPlan.linked - (skipProtected ? verifyPlan.protectedLinked : 0)}</strong> accounts · about {((verifyPlan.linked - (skipProtected ? verifyPlan.protectedLinked : 0)) * 10).toLocaleString()} credits (${(((verifyPlan.linked - (skipProtected ? verifyPlan.protectedLinked : 0)) * 10) / 100000).toFixed(2)}).</p>
@@ -451,7 +470,7 @@ export default function MembersPage({ session }: { session: Session }) {
     </div></div>}
 
     {verifyResult && <div className="modal-backdrop" onMouseDown={() => setVerifyResult(undefined)}><div className="modal modal-wide" onMouseDown={(e) => e.stopPropagation()}>
-      <div className="modal-icon"><BadgeCheck /></div><p className="eyebrow">X verification</p><h2>Linked X accounts checked</h2>
+      <div className="modal-icon"><BadgeCheck /></div><h2>Linked X accounts checked</h2>
       <p className="import-summary">{verifyResult.checked} accounts checked{verifyResult.include_protected ? '' : ' (protected members skipped)'} · {verifyResult.unavailable.length} suspended or gone · {verifyResult.renamed.length} renamed and updated automatically.</p>
       {verifyResult.unavailable.length > 0 && <><h3 className="sub-heading">Could not verify</h3><div className="table-wrap import-results"><table><tbody>{verifyResult.unavailable.map((row) => <tr key={row.discord_user_id}><td><span className="member-cell"><strong>{row.discord_username}</strong><small className="mono">{row.discord_user_id}</small></span></td><td><a href={`https://x.com/${row.twitter_handle}`} target="_blank">@{row.twitter_handle}</a></td><td><span className="status failed"><i />{row.status}</span></td><td className="muted">{row.reason}</td></tr>)}</tbody></table></div></>}
       {verifyResult.renamed.length > 0 && <><h3 className="sub-heading">Renamed on X</h3><div className="table-wrap import-results"><table><tbody>{verifyResult.renamed.map((row) => <tr key={row.discord_user_id}><td><span className="member-cell"><strong>{row.discord_username}</strong><small className="mono">{row.discord_user_id}</small></span></td><td className="muted">@{row.old_handle} → <a href={`https://x.com/${row.new_handle}`} target="_blank">@{row.new_handle}</a></td></tr>)}</tbody></table></div></>}
@@ -460,7 +479,7 @@ export default function MembersPage({ session }: { session: Session }) {
     </div></div>}
 
     {syncResult && <div className="modal-backdrop" onMouseDown={() => setSyncResult(undefined)}><div className="modal modal-wide" onMouseDown={(e) => e.stopPropagation()}>
-      <div className="modal-icon"><RefreshCw /></div><p className="eyebrow">Discord sync</p><h2>Server members compared with the registry</h2>
+      <div className="modal-icon"><RefreshCw /></div><h2>Server members compared with the registry</h2>
       <p className="import-summary">{syncResult.discord_members} humans in the server · {syncResult.added.length} newly registered · {syncResult.already_registered_active} already present + {syncResult.already_registered_inactive} inactive · {syncResult.bots_skipped} bots skipped · {syncResult.left_server.length} registered members no longer in the server.</p>
       <p className="import-summary">Registry now holds <strong>{syncResult.registry_active} active + {syncResult.registry_inactive} inactive</strong> members.</p>
       {syncResult.protected_roles_configured.length === 0 && <p className="estimate-warning">No protected role names are configured. Set <code>protected_role_names</code> in Scoring rules (for example: Active Supporter, Builder, Friend, Collaborator, Team) and sync again to protect members by their Discord roles.</p>}

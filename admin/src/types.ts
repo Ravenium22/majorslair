@@ -61,6 +61,8 @@ export type Overview = {
   tracked_posts: number
   cycle_id: string
   cycle_started_at: string
+  credits_this_month: number
+  scans_this_month: number
   bot_connected: boolean
   last_scan: Scan | null
   leaderboard: LinkedUser[]

@@ -108,16 +108,15 @@ export default function OverviewPage({ session }: { session: Session }) {
   const usd = (credits: number) => `$${(credits / 100000).toFixed(2)}`
 
   const metrics = [
-    { label: 'Linked members', value: data?.linked_members ?? 0, icon: Users, detail: 'Active accounts' },
-    { label: 'Cycle score', value: formatScore(data?.total_score ?? 0), icon: Trophy, detail: data?.cycle_id || 'No cycle' },
-    { label: 'Valid actions', value: data?.active_actions ?? 0, icon: Activity, detail: 'Current signal' },
-    { label: 'Tracked posts', value: data?.tracked_posts ?? 0, icon: Radar, detail: 'Active sources' },
+    { label: 'Members scoring', value: data?.linked_members ?? 0, icon: Users, detail: 'have linked an X account' },
+    { label: 'Points this cycle', value: formatScore(data?.total_score ?? 0), icon: Trophy, detail: 'awarded since the last reset' },
+    { label: 'Actions counted', value: data?.active_actions ?? 0, icon: Activity, detail: 'replies, quotes, retweets, mentions' },
+    { label: 'Posts watched', value: data?.tracked_posts ?? 0, icon: Radar, detail: 'from the two tracked accounts' },
   ]
 
   return (
     <div className="page">
       <PageHeader
-        eyebrow="Live operations"
         title="Engagement overview"
         copy="The current leaderboard cycle, scoring activity, and scan health at a glance."
         actions={<div className="system-pill"><i className={data?.bot_connected ? '' : 'offline'} /> Discord bot {data?.bot_connected ? 'online' : 'starting'}</div>}
@@ -157,7 +156,7 @@ export default function OverviewPage({ session }: { session: Session }) {
       </section>
       <section className="overview-grid">
         <article className="panel leaderboard-panel">
-          <div className="panel-head"><div><p className="eyebrow">Current standings</p><h2>Top contributors</h2></div><div className="panel-tools"><select value={window} onChange={(e) => setWindow(e.target.value as typeof window)} aria-label="Leaderboard window">{WINDOWS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select><a href="#members">All members <ArrowUpRight size={15} /></a></div></div>
+          <div className="panel-head"><div><h2>Top contributors</h2></div><div className="panel-tools"><select value={window} onChange={(e) => setWindow(e.target.value as typeof window)} aria-label="Leaderboard window">{WINDOWS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select><a href="#members">All members <ArrowUpRight size={15} /></a></div></div>
           {board.length ? (
             <div className="leader-list">
               {board.map((user, index) => (
@@ -175,8 +174,7 @@ export default function OverviewPage({ session }: { session: Session }) {
         </article>
         <aside className="scan-card">
           <div className="scan-visual"><Sparkles /><div className="orbit one" /><div className="orbit two" /></div>
-          <p className="eyebrow">Manual scan</p>
-          <h2>Refresh the signal</h2>
+          <h2>Run a scan</h2>
           <p>Collect recent replies, quotes, retweets, and organic mentions from tracked accounts.</p>
           <label>Lookback window<select value={period} onChange={(event) => setPeriod(event.target.value)}><option value="24h">Last 24 hours</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option><option value="60d">Last 60 days</option><option value="90d">Last 90 days</option><option value="180d">Last 6 months</option><option value="365d">Last 12 months</option></select></label>
           <button className="button primary" onClick={openScan} disabled={running || loadingEstimate}><Play size={17} />{running ? 'Scan running' : loadingEstimate ? 'Estimating cost…' : 'Run engagement scan'}</button>
@@ -186,7 +184,7 @@ export default function OverviewPage({ session }: { session: Session }) {
         </aside>
       </section>
       {estimate && <div className="modal-backdrop" onMouseDown={() => { if (!starting) setEstimate(undefined) }}><div className="modal" onMouseDown={(e) => e.stopPropagation()}>
-        <div className="modal-icon"><Play /></div><p className="eyebrow">Engagement scan</p><h2>Scan the {PERIOD_LABEL[period] ?? estimate.period}</h2>
+        <div className="modal-icon"><Play /></div><h2>Scan the {PERIOD_LABEL[period] ?? estimate.period}</h2>
         <p>The bot collects replies, quotes, retweets, and mentions on the tracked accounts' posts, then scores every linked member who shows up. Cost depends on how many posts and replies there are, not on the member count.</p>
         <dl className="estimate-grid">
           <div><dt>Members who will be scored</dt><dd>{estimate.linked_members - (skipProtected ? estimate.protected_linked : 0)}<small>{skipProtected ? `${estimate.protected_linked} protected skipped` : `${estimate.protected_linked} of them protected`} · {estimate.unlinked_members} without X</small></dd></div>
@@ -213,9 +211,9 @@ export default function OverviewPage({ session }: { session: Session }) {
         <div className="modal-actions"><button className="button ghost" onClick={() => setShowReset(false)} disabled={resetting}>Cancel</button><button className="button danger" disabled={confirmation !== 'RESET LEADERBOARD' || resetting} onClick={reset}><RotateCcw size={16} /> {resetting ? 'Freezing…' : 'Freeze and start a new cycle'}</button></div>
       </div></div>}
       <section className="panel scan-history">
-        <div className="panel-head"><div><p className="eyebrow">System activity</p><h2>Recent scan runs</h2></div><Bot size={21} /></div>
+        <div className="panel-head"><div><h2>Recent scans</h2></div><Bot size={21} /></div>
         <div className="table-wrap"><table><thead><tr><th>Status</th><th>Window</th><th>Source</th><th>Started</th><th>Matched</th><th>X issues</th><th>Requests</th></tr></thead><tbody>
-          {data?.recent_scans.map((item) => <tr key={item.scan_id}><td><Status state={item.status} /></td><td className="mono">{item.period}</td><td>{item.source}</td><td>{formatDate(item.started_at)}</td><td>{String(item.summary?.discovered ?? '—')}</td><td>{Array.isArray(item.summary?.x_unavailable) ? (item.summary.x_unavailable.length ? <a href="#members" className="issue-link">{item.summary.x_unavailable.length} suspended</a> : '0') : '—'}</td><td>{String(item.summary?.api_requests ?? '—')}</td></tr>)}
+          {data?.recent_scans.map((item) => <tr key={item.scan_id}><td><Status state={item.status} /></td><td className="mono">{item.period}</td><td>{item.source}</td><td>{formatDate(item.started_at)}</td><td>{String(item.summary?.discovered ?? '—')}</td><td>{Array.isArray(item.summary?.x_unavailable) ? (item.summary.x_unavailable.length ? <a href="#members?view=xissues" className="issue-link">{item.summary.x_unavailable.length} suspended</a> : '0') : '—'}</td><td>{String(item.summary?.api_requests ?? '—')}</td></tr>)}
         </tbody></table></div>
       </section>
     </div>

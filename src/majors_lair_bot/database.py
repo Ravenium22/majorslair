@@ -944,6 +944,22 @@ class DatabaseRepository:
                 session, cycle.value if cycle else ""
             )
             started = await session.get(ConfigRow, "cycle_started_at")
+            month_start = utc_now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            month_runs = (
+                await session.scalars(
+                    select(ScanRunRow).where(
+                        ScanRunRow.started_at >= month_start, ScanRunRow.status == "complete"
+                    )
+                )
+            ).all()
+            # twitterapi.io bills 15 credits per item returned and 10 per profile checked.
+            credits_this_month = 0
+            for run in month_runs:
+                summary = run.summary or {}
+                items = int(summary.get("tweets_returned") or 0)
+                requests = int(summary.get("api_requests") or 0)
+                checked = int(summary.get("x_checked") or 0)
+                credits_this_month += max(items, requests) * 15 + checked * 10
             last_scan = await session.scalar(
                 select(ScanRunRow).order_by(ScanRunRow.started_at.desc()).limit(1)
             )
@@ -955,6 +971,8 @@ class DatabaseRepository:
             "tracked_posts": tracked_count,
             "cycle_id": cycle.value if cycle else "",
             "cycle_started_at": started.value if started else "",
+            "credits_this_month": credits_this_month,
+            "scans_this_month": len(month_runs),
             "last_scan": self._scan_dict(last_scan, names) if last_scan else None,
         }
 
@@ -1154,9 +1172,25 @@ class DatabaseRepository:
         }
 
     async def paginated_audit(
-        self, *, event_type: str = "", page: int = 1, page_size: int = 50
+        self, *, event_type: str = "", search: str = "", page: int = 1, page_size: int = 50
     ) -> dict[str, Any]:
         filters = [AuditRow.event_type == event_type] if event_type else []
+        if search.strip():
+            pattern = f"%{search.strip()}%"
+            member_ids = select(UserRow.discord_user_id).where(
+                UserRow.discord_username.ilike(pattern)
+            )
+            filters.append(
+                or_(
+                    AuditRow.actor_discord_id.ilike(pattern),
+                    AuditRow.subject_discord_id.ilike(pattern),
+                    AuditRow.old_value.ilike(pattern),
+                    AuditRow.new_value.ilike(pattern),
+                    AuditRow.event_type.ilike(pattern),
+                    AuditRow.actor_discord_id.in_(member_ids),
+                    AuditRow.subject_discord_id.in_(member_ids),
+                )
+            )
         count_statement = select(func.count()).select_from(AuditRow).where(*filters)
         statement = (
             select(AuditRow)
@@ -1180,7 +1214,15 @@ class DatabaseRepository:
                     )
                 ).all():
                     names[user_id] = username
+            event_types = sorted(
+                value
+                for (value,) in (
+                    await session.execute(select(AuditRow.event_type).distinct())
+                ).all()
+                if value
+            )
         return {
+            "event_types": event_types,
             "items": [
                 {
                     "event_id": row.event_id,

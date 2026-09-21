@@ -419,3 +419,24 @@ async def test_low_activity_report_states_what_it_excluded(
     plain = await repository.low_activity_report(5, grace_days=0)
     assert sorted(item["discord_user_id"] for item in plain["items"]) == ["1", "3", "4"]
     assert plain["excluded_newcomers"] == 0 and plain["excluded_protected"] == 1
+
+
+@pytest.mark.asyncio
+async def test_audit_trail_is_searchable_by_member(repository: DatabaseRepository) -> None:
+    await repository.register_member(discord_user_id="10", discord_username="alice")
+    await repository.register_member(discord_user_id="20", discord_username="bob")
+    await repository.append_audit(
+        event_type="admin_points_adjusted", actor_discord_id="10", subject_discord_id="20"
+    )
+    await repository.append_audit(event_type="engagement_scan", actor_discord_id="10")
+
+    by_name = await repository.paginated_audit(search="bob")
+    assert [item["event_type"] for item in by_name["items"]] == ["admin_points_adjusted"]
+
+    by_id = await repository.paginated_audit(search="20")
+    assert by_id["total"] == 1
+
+    by_type = await repository.paginated_audit(event_type="engagement_scan")
+    assert by_type["total"] == 1
+    assert "engagement_scan" in by_type["event_types"]
+    assert "admin_points_adjusted" in by_type["event_types"]

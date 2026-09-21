@@ -1160,11 +1160,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/audit")
     async def audit(
-        _: Admin, event_type: str = "", page: int = 1, page_size: int = 50
+        _: Admin, event_type: str = "", search: str = "", page: int = 1, page_size: int = 50
     ) -> dict[str, Any]:
         page, page_size = _page(page, page_size)
         return await runtime.repository.paginated_audit(
-            event_type=event_type, page=page, page_size=page_size
+            event_type=event_type, search=search, page=page, page_size=page_size
         )
 
     @app.get("/api/tracked-posts")

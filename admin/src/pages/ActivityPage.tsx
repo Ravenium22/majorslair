@@ -31,7 +31,7 @@ export default function ActivityPage({ session }: { session: Session }) {
   }
 
   return <div className="page">
-    <PageHeader eyebrow="Scoring evidence" title="Activity log" copy="Inspect every discovered action, its point award, and the exact scoring explanation." actions={<button className="button" onClick={() => setShowDiagnose(true)}><Stethoscope size={17} /> Why isn't this counted?</button>} />
+    <PageHeader title="Activity log" copy="Inspect every discovered action, its point award, and the exact scoring explanation." actions={<button className="button" onClick={() => setShowDiagnose(true)}><Stethoscope size={17} /> Why isn't this counted?</button>} />
     {notice && <Toast message={notice.text} kind={notice.kind} />}
     <section className="panel">
       <div className="toolbar"><label className="search"><Search size={17} /><input value={search} onChange={(e) => { setSearch(e.target.value); setPage(1) }} placeholder="Search handle, text, or reason" /></label><select value={type} onChange={(e) => { setType(e.target.value); setPage(1) }}><option value="">All action types</option><option value="reply">Replies</option><option value="quote">Quotes</option><option value="retweet">Retweets</option><option value="mention">Mentions</option></select></div>
@@ -42,7 +42,7 @@ export default function ActivityPage({ session }: { session: Session }) {
     </section>
 
     {showDiagnose && <div className="modal-backdrop" onMouseDown={() => { if (!diagnosing) { setShowDiagnose(false); setDiagnosis(undefined) } }}><div className="modal modal-wide" onMouseDown={(e) => e.stopPropagation()}>
-      <div className="modal-icon"><Stethoscope /></div><p className="eyebrow">Diagnosis</p><h2>Why isn't this tweet counted?</h2>
+      <div className="modal-icon"><Stethoscope /></div><h2>Why isn't this tweet counted?</h2>
       <p>Paste the URL of a reply, quote or post. The bot checks whether the author is linked, whether the tweet is already in the log, what it would score today, and whether X actually shows it in the parent's reply list and in search. Costs a few credits.</p>
       <form onSubmit={diagnose} className="diagnose-form">
         <input name="url" placeholder="https://x.com/user/status/123456789" required autoFocus disabled={diagnosing} />

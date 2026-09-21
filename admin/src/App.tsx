@@ -6,9 +6,9 @@ import {
   Bot,
   ChartNoAxesColumnIncreasing,
   CircleGauge,
-  Database,
   LogOut,
   Menu,
+  Coins,
   Radar,
   ScrollText,
   UserRoundMinus,
@@ -18,7 +18,7 @@ import {
 } from 'lucide-react'
 import useSWR from 'swr'
 import { api, mutateApi, type ApiError } from './api'
-import type { Session } from './types'
+import type { Overview, Session } from './types'
 import OverviewPage from './pages/OverviewPage'
 import MembersPage from './pages/MembersPage'
 import PostsPage from './pages/PostsPage'
@@ -90,17 +90,17 @@ function Login() {
 }
 
 function Shell({ session, children }: { session: Session; children: ReactNode }) {
-  const [route, setRoute] = useState<RouteId>(() => {
-    const hash = window.location.hash.slice(1) as RouteId
+  const { data: overview } = useSWR<Overview>('/api/overview', fetcher, { refreshInterval: 30000 })
+  // Routes look like #members?points=low, so a filtered view can be reloaded or linked.
+  const readRoute = () => {
+    const hash = window.location.hash.slice(1).split('?')[0] as RouteId
     return routes.some((item) => item.id === hash) ? hash : 'overview'
-  })
+  }
+  const [route, setRoute] = useState<RouteId>(readRoute)
   const [mobileOpen, setMobileOpen] = useState(false)
 
   useEffect(() => {
-    const onHash = () => {
-      const hash = window.location.hash.slice(1) as RouteId
-      if (routes.some((item) => item.id === hash)) setRoute(hash)
-    }
+    const onHash = () => setRoute(readRoute())
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
@@ -166,9 +166,8 @@ function Shell({ session, children }: { session: Session; children: ReactNode })
           })}
         </nav>
         <div className="sidebar-system">
-          <p className="nav-label">Infrastructure</p>
-          <div><Database size={16} /><span>PostgreSQL<small>Local · backed up nightly</small></span></div>
-          <div><Bot size={16} /><span>Discord gateway<small>Role protected</small></span></div>
+          <div><Coins size={16} /><span>{overview ? `$${(overview.credits_this_month / 100000).toFixed(2)} this month` : 'Spend this month'}<small>{overview ? `${overview.scans_this_month} scan${overview.scans_this_month === 1 ? '' : 's'} on twitterapi.io` : 'twitterapi.io'}</small></span></div>
+          <div><Bot size={16} /><span>Discord bot<small>{overview?.bot_connected ? 'connected' : 'starting up'}</small></span></div>
         </div>
         <div className="profile">
           {session.user.avatar_url ? (
@@ -190,7 +189,61 @@ function Shell({ session, children }: { session: Session; children: ReactNode })
   )
 }
 
+/** Every dialog in the app is an inline `.modal-backdrop`; rather than rewrite a dozen
+ *  call sites, watch for one appearing and give it the semantics and focus behaviour a
+ *  dialog needs: a name, a focus trap, and the focus back where it came from. */
+function useDialogBehaviour() {
+  useEffect(() => {
+    let restoreTo: HTMLElement | null = null
+    const focusable = (root: HTMLElement) => [...root.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    )].filter((el) => el.offsetParent !== null)
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab') return
+      const dialog = document.querySelector<HTMLElement>('.modal-backdrop .modal')
+      if (!dialog) return
+      const items = focusable(dialog)
+      if (!items.length) return
+      const first = items[0]
+      const last = items[items.length - 1]
+      const active = document.activeElement as HTMLElement | null
+      if (event.shiftKey && (active === first || !dialog.contains(active))) { event.preventDefault(); last.focus() }
+      else if (!event.shiftKey && active === last) { event.preventDefault(); first.focus() }
+    }
+
+    const sync = () => {
+      const dialog = document.querySelector<HTMLElement>('.modal-backdrop .modal')
+      if (dialog) {
+        if (!dialog.getAttribute('role')) {
+          restoreTo = document.activeElement as HTMLElement | null
+          dialog.setAttribute('role', 'dialog')
+          dialog.setAttribute('aria-modal', 'true')
+          const heading = dialog.querySelector('h2')
+          if (heading) {
+            if (!heading.id) heading.id = `dialog-title-${Math.random().toString(36).slice(2, 8)}`
+            dialog.setAttribute('aria-labelledby', heading.id)
+          }
+          if (!dialog.contains(document.activeElement)) (focusable(dialog)[0] ?? dialog).focus()
+        }
+        document.body.style.overflow = 'hidden'
+      } else {
+        document.body.style.overflow = ''
+        if (restoreTo?.isConnected) restoreTo.focus()
+        restoreTo = null
+      }
+    }
+
+    const observer = new MutationObserver(sync)
+    observer.observe(document.body, { childList: true, subtree: true })
+    document.addEventListener('keydown', onKeyDown, true)
+    sync()
+    return () => { observer.disconnect(); document.removeEventListener('keydown', onKeyDown, true); document.body.style.overflow = '' }
+  }, [])
+}
+
 export default function App() {
+  useDialogBehaviour()
   const { data, error, isLoading } = useSWR<Session, ApiError>('/api/session', fetcher, {
     shouldRetryOnError: false,
   })

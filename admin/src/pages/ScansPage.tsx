@@ -56,7 +56,7 @@ export default function ScansPage() {
   const { data, isLoading } = useSWR<Paginated<ScanRun>>(`/api/scan-runs?page=${page}&page_size=${PAGE_SIZE}`, api, { refreshInterval: 15000 })
 
   return <div className="page">
-    <PageHeader eyebrow="Permanent record" title="Scan reports" copy="Every engagement scan ever run, with what it matched, what it cost, which X accounts could not be verified, and who gained points. Reports are never deleted, not even by a leaderboard reset." />
+    <PageHeader title="Scan reports" copy="Every engagement scan ever run, with what it matched, what it cost, which X accounts could not be verified, and who gained points. Reports are never deleted, not even by a leaderboard reset." />
     <section className="panel">
       <div className="table-wrap"><table className="scan-table"><thead><tr><th /><th>Status</th><th>Window</th><th>Started</th><th>Took</th><th>Run from</th><th>Posts</th><th>Matched</th><th>Points moved</th><th>X issues</th><th>≈ Cost</th></tr></thead><tbody>
         {data?.items.map((run) => {
@@ -69,7 +69,7 @@ export default function ScansPage() {
           const cost = credits(s)
           const expanded = open === run.scan_id
           return <Fragment key={run.scan_id}>
-            <tr className={`scan-row ${expanded ? 'open' : ''}`} onClick={() => setOpen(expanded ? undefined : run.scan_id)}>
+            <tr className={`scan-row ${expanded ? 'open' : ''}`} tabIndex={0} role="button" aria-expanded={expanded} aria-label={`${run.period} scan from ${formatDate(run.started_at)}`} onClick={() => setOpen(expanded ? undefined : run.scan_id)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen(expanded ? undefined : run.scan_id) } }}>
               <td className="chev">{expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</td>
               <td><Status state={run.status} /></td>
               <td className="mono">{run.period}</td>
@@ -134,10 +134,10 @@ export default function ScansPage() {
     </section>
     <p className="muted small page-note"><ScrollText size={13} /> Cost is approximate: 15 credits per item or request, 10 per X account check.</p>
     <section className="panel reset-panel">
-      <div className="panel-head"><div><p className="eyebrow">Leaderboard resets</p><h2>Frozen standings from every reset</h2></div></div>
+      <div className="panel-head"><div><h2>Frozen standings from every reset</h2></div></div>
       {snapshots?.length ? <div className="table-wrap"><table><thead><tr><th /><th>Reset on</th><th>Cycle closed</th><th>Members</th><th>Top member</th><th>Reset by</th><th /></tr></thead><tbody>
         {snapshots.map((snap) => { const expanded = openSnapshot === snap.snapshot_id; return <Fragment key={snap.snapshot_id}>
-          <tr className={`scan-row ${expanded ? 'open' : ''}`} onClick={() => setOpenSnapshot(expanded ? undefined : snap.snapshot_id)}>
+          <tr className={`scan-row ${expanded ? 'open' : ''}`} tabIndex={0} role="button" aria-expanded={expanded} onClick={() => setOpenSnapshot(expanded ? undefined : snap.snapshot_id)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpenSnapshot(expanded ? undefined : snap.snapshot_id) } }}>
             <td className="chev">{expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</td>
             <td>{formatDate(snap.reset_at)}</td><td className="mono">{snap.cycle_id}</td><td>{snap.members.length}</td>
             <td>{snap.members[0] ? `${snap.members[0].discord_username} · ${formatScore(snap.members[0].score)} pts` : '—'}</td>
