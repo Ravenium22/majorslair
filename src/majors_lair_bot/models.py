@@ -109,6 +109,7 @@ class ScanSummary:
     skipped_unlinked: int = 0
     skipped_protected: int = 0
     swept_replies: int = 0
+    capped_posts: int = 0
     timeline_replies: int = 0
     timeline_members_checked: int = 0
     incomplete_scopes: int = 0

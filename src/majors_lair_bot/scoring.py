@@ -17,7 +17,7 @@ DEFAULT_CONFIG: dict[str, str] = {
     "default_refresh_period": "24h",
     "max_source_pages": "50",
     "max_action_pages_per_post": "8",
-    "max_mention_pages": "10",
+    "max_mention_pages": "50",
     "max_reply_search_pages": "25",
     "member_timeline_pages": "0",
     "protected_role_names": "",
@@ -62,7 +62,11 @@ CONFIG_DESCRIPTIONS: dict[str, str] = {
         "long ones."
     ),
     "max_action_pages_per_post": "Safety cap per replies/quotes/retweeters endpoint.",
-    "max_mention_pages": "Safety cap per target account mention scan.",
+    "max_mention_pages": (
+        "Pages (20 mentions each) of each tracked account's mention feed read per scan. Busy "
+        "accounts get 200+ mentions a week, so long windows need more pages; the scan "
+        "estimate warns when the cap will cut the window short."
+    ),
     "max_reply_search_pages": (
         "Pages (20 replies each) of the reply sweep per tracked account. The sweep searches "
         "to:@account so replies X hides from a post's reply list still count."

@@ -156,7 +156,7 @@ class AdjustRequest(BaseModel):
 
 class MemberScanRequest(BaseModel):
     period: str = Field(default="30d", min_length=2, max_length=10)
-    max_pages: int = Field(default=25, ge=1, le=100)
+    max_pages: int = Field(default=25, ge=1, le=250)
 
 
 class DiagnoseRequest(BaseModel):
@@ -168,7 +168,7 @@ class ScanRequest(BaseModel):
     verify_x: bool = True
     skip_protected: bool | None = None
     read_timelines: bool | None = None
-    timeline_pages: int | None = Field(default=None, ge=1, le=100)
+    timeline_pages: int | None = Field(default=None, ge=1, le=250)
 
 
 class TrackPostRequest(BaseModel):

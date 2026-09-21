@@ -20,7 +20,8 @@ export default function OverviewPage({ session }: { session: Session }) {
   const [verifyX, setVerifyX] = useState(true)
   const [skipProtected, setSkipProtected] = useState(false)
   const [readTimelines, setReadTimelines] = useState(false)
-  const [timelinePages, setTimelinePages] = useState(1)
+  const [timelineTweets, setTimelineTweets] = useState(20)
+  const timelinePages = Math.min(250, Math.max(1, Math.ceil(timelineTweets / 20)))
   const [starting, setStarting] = useState(false)
 
   const [loadingEstimate, setLoadingEstimate] = useState(false)
@@ -125,7 +126,7 @@ export default function OverviewPage({ session }: { session: Session }) {
         <label className="check-row"><input type="checkbox" checked={skipProtected} onChange={(e) => setSkipProtected(e.target.checked)} disabled={starting} /> Skip protected members ({estimate.protected_linked}): not scored, not X-checked. Their existing points stay as they are.</label>
         <label className="check-row"><input type="checkbox" checked={verifyX} onChange={(e) => setVerifyX(e.target.checked)} disabled={starting} /> Verify X accounts during this scan ({verifyCount} accounts · ≈ {verifyCredits.toLocaleString()} credits)</label>
         <label className="check-row"><input type="checkbox" checked={readTimelines} onChange={(e) => setReadTimelines(e.target.checked)} disabled={starting} /> Deep check: also read every member's own timeline to catch replies X hides everywhere else ({timelineMembers} members). Off again next time.</label>
-        {readTimelines && <div className="check-row nested depth-row"><span>Depth per member:</span><select value={timelinePages} onChange={(e) => setTimelinePages(Number(e.target.value))} disabled={starting}><option value={1}>latest 20 tweets</option><option value={3}>latest 60 tweets</option><option value={5}>latest 100 tweets</option><option value={10}>latest 200 tweets</option><option value={25}>latest 500 tweets</option></select><span className="muted">≈ {timelineCredits.toLocaleString()} credits ({usd(timelineCredits)}) at most, less when it reaches the window start first</span></div>}
+        {readTimelines && <div className="check-row nested depth-row"><span>Latest tweets per member:</span><div className="segmented">{[20, 100, 300, 500, 1000].map((n) => <button type="button" key={n} className={timelineTweets === n ? 'active' : ''} onClick={() => setTimelineTweets(n)} disabled={starting}>{n.toLocaleString()}</button>)}</div><label className="depth-custom">custom<input type="number" min={20} max={5000} step={20} value={timelineTweets} onChange={(e) => setTimelineTweets(Math.min(5000, Math.max(20, Number(e.target.value) || 20)))} disabled={starting} /></label><span className="muted">≈ {timelineCredits.toLocaleString()} credits ({usd(timelineCredits)}) at most, less when it reaches the window start first</span></div>}
         <div className="modal-actions"><button type="button" className="button ghost" onClick={() => setEstimate(undefined)} disabled={starting}>Cancel</button><button className="button primary" onClick={scan} disabled={starting}><Play size={16} />{starting ? 'Starting…' : 'Start scan'}</button></div>
       </div></div>}
       <section className="panel scan-history">

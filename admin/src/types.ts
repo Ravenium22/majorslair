@@ -138,6 +138,7 @@ export type ScanEstimate = {
     source_credits: number
     engagement_credits: number
     mentions_credits_max: number
+    mention_coverage: { handle: string; per_page_days?: number; pages_needed: number; covered_days: number }[]
     sweep_credits_max: number
     timeline_credits_max: number
     timeline_pages: number
@@ -229,5 +230,6 @@ export type Diagnosis = {
   reply_endpoint?: { found: boolean; returned: number; complete: boolean }
   sweep?: { found: boolean; returned: number; complete: boolean }
   timeline?: { found: boolean; returned: number; enabled: boolean }
+  mention_feed?: { target: string; found: boolean; returned: number; cap_pages: number }
 }
 

@@ -530,7 +530,7 @@ class EngagementCog(commands.Cog):
     @app_commands.describe(
         member="The member to scan",
         period="Window to read (default: last 30 days)",
-        depth="How many of their latest tweets to read at most (default 500, max 2000)",
+        depth="How many of their latest tweets to read at most (default 500, max 5000)",
     )
     @app_commands.choices(period=PERIOD_CHOICES)
     @app_commands.guild_only()
@@ -540,7 +540,7 @@ class EngagementCog(commands.Cog):
         interaction: discord.Interaction,
         member: discord.Member,
         period: str = "30d",
-        depth: app_commands.Range[int, 20, 2000] = 500,
+        depth: app_commands.Range[int, 20, 5000] = 500,
     ) -> None:
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
@@ -576,7 +576,7 @@ class EngagementCog(commands.Cog):
             "Also read every member's own timeline to catch replies X hides "
             "(about 300 credits per member; default: the member_timeline_pages setting)"
         ),
-        timeline_depth="With read_timelines: how many latest tweets per member (20-2000)",
+        timeline_depth="With read_timelines: how many latest tweets per member (20-5000)",
     )
     @app_commands.choices(period=PERIOD_CHOICES)
     @app_commands.guild_only()
@@ -587,7 +587,7 @@ class EngagementCog(commands.Cog):
         period: str = "7d",
         skip_protected: bool | None = None,
         read_timelines: bool | None = None,
-        timeline_depth: app_commands.Range[int, 20, 2000] | None = None,
+        timeline_depth: app_commands.Range[int, 20, 5000] | None = None,
     ) -> None:
         await self._run_scan(interaction, period, skip_protected, read_timelines, timeline_depth)
 

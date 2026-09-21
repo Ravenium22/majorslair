@@ -235,10 +235,48 @@ class EngagementService:
 
         parent_id = tweet.reply_to_tweet_id
         if not parent_id:
-            findings.append(
-                "This is not a reply. Standalone posts only count as mentions when they "
-                "mention a tracked account."
+            lowered = tweet.text.lower()
+            mentioned = next((t for t in sorted(targets) if f"@{t}" in lowered), "")
+            if not mentioned:
+                findings.append(
+                    "This is a standalone post that does not @-mention a tracked account, so it "
+                    "can never count. Naming the account without the @ is not a mention."
+                )
+                return result
+            window_since = tweet.created_at - timedelta(days=1)
+            window_until = tweet.created_at + timedelta(days=1)
+            feed = await self.twitter.get_mentions(
+                mentioned, since=window_since, until=window_until, max_pages=5
             )
+            feed_ids = set()
+            for raw in feed.items:
+                try:
+                    feed_ids.add(parse_tweet(raw).tweet_id)
+                except (TypeError, ValueError):
+                    continue
+            in_feed = tweet_id in feed_ids
+            cap_pages = self._config_int(config, "max_mention_pages")
+            result["mention_feed"] = {
+                "target": mentioned,
+                "found": in_feed,
+                "returned": len(feed_ids),
+                "cap_pages": cap_pages,
+            }
+            if in_feed:
+                findings.append(
+                    f"X's mention feed for @{mentioned} does return this post around its date. "
+                    f"A scan misses it only when the mention page cap ({cap_pages} pages, "
+                    f"about {cap_pages * 20} newest mentions) runs out before reaching "
+                    f"{tweet.created_at.date().isoformat()}. Raise max_mention_pages for long "
+                    "windows, or run a single-member scan."
+                )
+            else:
+                findings.append(
+                    f"X's mention feed for @{mentioned} does NOT return this post "
+                    f"({len(feed_ids)} mentions read around its date): X filters it, the "
+                    "same way it hides low-quality replies. Only a single-member scan or the "
+                    "Deep check can see it."
+                )
             return result
 
         parents = await self.twitter.get_tweets([parent_id])
@@ -805,6 +843,7 @@ class EngagementService:
             complete = bool(result and result.complete)
             if result is not None and not result.complete:
                 summary.incomplete_scopes += 1
+                summary.capped_posts += 1
             scopes.append(
                 ReconcileScope(
                     action_type=action_type,
@@ -1068,6 +1107,23 @@ class EngagementService:
                 continue
             if not result.complete:
                 summary.incomplete_scopes += 1
+                oldest = None
+                for raw in result.items:
+                    try:
+                        created = parse_tweet(raw).created_at
+                    except (TypeError, ValueError):
+                        continue
+                    oldest = created if oldest is None or created < oldest else created
+                reached = (
+                    f"; oldest mention read is from {oldest.date().isoformat()}"
+                    if oldest is not None
+                    else ""
+                )
+                summary.warnings.append(
+                    f"Mention feed of @{target} hit the page cap "
+                    f"(max_mention_pages={max_pages}){reached}. Older shout-outs in this "
+                    "window were not read; raise the setting for long windows."
+                )
             scopes.append(
                 ReconcileScope(
                     action_type=ActionType.MENTION,
@@ -1219,6 +1275,11 @@ class EngagementService:
                 discovered.extend(post_actions)
                 scopes.extend(post_scopes)
 
+            if summary.capped_posts:
+                summary.warnings.append(
+                    f"{summary.capped_posts} reply/quote/retweet list(s) hit the per-post page "
+                    "cap (max_action_pages_per_post); very busy posts may be under-counted."
+                )
             counted_ids = {
                 action.action_tweet_id for action in discovered if action.action_tweet_id
             }
@@ -1419,6 +1480,53 @@ class EngagementService:
         source_credits = max(len(posts), estimate_requests) * credit_per_item
         engagement_credits = engagement_items * credit_per_item
         mentions_credits_max = mention_cap * credit_per_item * 2
+        # Project whether the mention cap can cover the window: read one page per account and
+        # measure how many days it spans. Costs about 300 credits per account, cached below.
+        mention_pages_cap = self._config_int(config, "max_mention_pages")
+        window_days = max(duration.total_seconds() / 86400, 1 / 24)
+        mention_coverage: list[dict[str, Any]] = []
+        for handle in (rules.primary_handle, rules.secondary_handle):
+            if not handle:
+                continue
+            try:
+                sample = await self.twitter.get_mentions(
+                    handle, since=since, until=until, max_pages=1
+                )
+            except TwitterApiError as exc:
+                warnings.append(f"Could not sample the mention feed of @{handle}: {exc}")
+                continue
+            dates = []
+            for raw in sample.items:
+                try:
+                    dates.append(parse_tweet(raw).created_at)
+                except (TypeError, ValueError):
+                    continue
+            if len(dates) < 2 or sample.complete:
+                # Fewer than a page of mentions in the window: the cap is irrelevant.
+                mention_coverage.append(
+                    {"handle": handle, "pages_needed": 1, "covered_days": window_days}
+                )
+                continue
+            span_days = max((max(dates) - min(dates)).total_seconds() / 86400, 1 / 24)
+            per_page_days = span_days
+            pages_needed = int(window_days / per_page_days) + 1
+            covered_days = round(per_page_days * mention_pages_cap, 1)
+            mention_coverage.append(
+                {
+                    "handle": handle,
+                    "per_page_days": round(per_page_days, 2),
+                    "pages_needed": pages_needed,
+                    "covered_days": covered_days,
+                }
+            )
+            if pages_needed > mention_pages_cap:
+                warnings.append(
+                    f"@{handle} gets a page of mentions every ~{per_page_days:.1f} days, so "
+                    f"max_mention_pages={mention_pages_cap} covers only about "
+                    f"{covered_days:g} of the {window_days:.0f} days in this window. Set it to "
+                    f"about {pages_needed} in Scoring rules → Scan guardrails before this scan "
+                    f"(≈ {pages_needed * page_size * credit_per_item:,} credits for this account)."
+                )
         sweep_cap = self._config_int(config, "max_reply_search_pages") * page_size
         sweep_credits_max = sweep_cap * credit_per_item * 2
         timeline_pages = self._config_int(config, "member_timeline_pages", minimum=0)
@@ -1443,6 +1551,7 @@ class EngagementService:
             "source_credits": source_credits,
             "engagement_credits": engagement_credits,
             "mentions_credits_max": mentions_credits_max,
+            "mention_coverage": mention_coverage,
             "sweep_credits_max": sweep_credits_max,
             "timeline_credits_max": timeline_credits_max,
             "timeline_pages": timeline_pages,

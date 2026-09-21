@@ -208,9 +208,14 @@ async def test_estimate_scan_sums_post_counters_and_caches(repository: DatabaseR
     from datetime import UTC, datetime
 
     from majors_lair_bot.models import Tweet
+    from majors_lair_bot.twitter_client import PageResult
 
     class CountingTwitter(FakeTwitter):
         calls = 0
+
+        async def get_mentions(self, handle: str, **_: object) -> PageResult:
+            self.request_count += 1
+            return PageResult(items=[], complete=True, pages=1)
 
         async def get_recent_tweets(self, handle: str, **_: object) -> tuple[list[Tweet], bool]:
             self.calls += 1
