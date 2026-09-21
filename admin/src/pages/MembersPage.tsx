@@ -24,7 +24,7 @@ const POINTS = [
   { id: 'any', label: 'Any points' },
   { id: 'positive', label: 'Has points' },
   { id: 'zero', label: '0 points' },
-  { id: 'low', label: 'Low activity' },
+  { id: 'low', label: 'At or below threshold' },
 ] as const
 const JOINED = [
   { id: 'any', label: 'Any join date' },
@@ -342,8 +342,9 @@ export default function MembersPage({ session }: { session: Session }) {
       <div className="toolbar filters wrap">
         <div className="segmented">{SEGMENTS.map((item) => <button className={segment === item.id ? 'active' : ''} aria-pressed={segment === item.id} onClick={() => resetPage(setSegment)(item.id)} key={item.id}>{item.label}</button>)}</div>
         <div className="segmented">{PROTECTION.map((item) => <button className={protection === item.id ? 'active' : ''} aria-pressed={protection === item.id} onClick={() => resetPage(setProtection)(item.id)} key={item.id}>{item.label}</button>)}</div>
-        <div className="segmented">{POINTS.map((item) => <button className={points === item.id ? 'active' : ''} aria-pressed={points === item.id} onClick={() => resetPage(setPoints)(item.id)} key={item.id} title={item.id === 'low' ? 'At or below the low-activity threshold from Scoring rules, or the number you type next to it' : undefined}>{item.label}</button>)}</div>
-        {points === 'low' && <label className="threshold-box">≤<input type="number" min={0} step={1} inputMode="numeric" placeholder="pts" value={lowThreshold} onChange={(e) => { const v = e.target.value.replace(/[^0-9]/g, ''); setLowThreshold(v); setPage(1) }} title="Points at or below this count as low activity for this view. Empty = the threshold from Scoring rules." /><span className="muted small">pts{lowThreshold === '' ? ' (setting)' : ''}</span></label>}
+        <div className="segmented">{POINTS.map((item) => <button className={points === item.id ? 'active' : ''} aria-pressed={points === item.id} onClick={() => resetPage(setPoints)(item.id)} key={item.id} title={item.id === 'low' ? 'Everyone at or below the threshold, protected members and newcomers included. The Low-activity report leaves those out.' : undefined}>{item.label}</button>)}</div>
+        {points === 'low' && <label className="threshold-box">≤<input type="number" min={0} step={1} inputMode="numeric" placeholder="pts" value={lowThreshold} onChange={(e) => { const v = e.target.value.replace(/[^0-9]/g, ''); setLowThreshold(v); setPage(1) }} title="Points at or below this count as low activity for this view. Empty = the threshold from Scoring rules." /><span className="muted small">pts{lowThreshold === '' ? ' (from Scoring rules)' : ''}</span></label>}
+        {points === 'low' && <span className="filter-note">Includes protected members and recent joiners. <a href="#low-activity">Low-activity report</a> leaves them out.</span>}
         <div className="segmented">{JOINED.map((item) => <button className={joined === item.id ? 'active' : ''} aria-pressed={joined === item.id} onClick={() => resetPage(setJoined)(item.id)} key={item.id} title={item.id === 'new' ? 'Joined Discord within the grace period (newcomer_grace_days in Scoring rules); never in the low-activity report' : item.id === 'established' ? 'Joined before the grace period, or join date unknown' : undefined}>{item.label}</button>)}</div>
         <div className="segmented">{['active', 'inactive', 'all'].map((value) => <button className={filter === value ? 'active' : ''} aria-pressed={filter === value} onClick={() => resetPage(setFilter)(value)} key={value}>{value === 'active' ? 'Active' : value === 'inactive' ? 'Inactive' : 'All'}</button>)}</div>
         <span className="filter-count">{data ? `${data.total.toLocaleString()} member${data.total === 1 ? '' : 's'}` : ''}{hasFilters && <button className="link-button" onClick={clearFilters}>Clear filters</button>}</span>

@@ -291,3 +291,4 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .drawer-tools { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line-soft); }
 .freeze-summary { margin: 16px 0 0; padding: 14px 16px; border: 1px solid var(--line-soft); background: #0c0f0f; }
 .freeze-summary dd:last-child { margin-bottom: 0; }
+.filter-note { flex-basis: 100%; color: var(--muted); font-size: 12px; line-height: 1.5; }

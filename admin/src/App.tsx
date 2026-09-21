@@ -144,7 +144,6 @@ function Shell({ session, children }: { session: Session; children: ReactNode })
           <div><strong>MAJOR'S LAIR</strong><span>ENGAGEMENT OPS</span></div>
         </div>
         <nav>
-          <p className="nav-label">Control room</p>
           {routes.map((item) => {
             const Icon = item.icon
             return (
