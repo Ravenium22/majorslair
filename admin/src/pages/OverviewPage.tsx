@@ -26,7 +26,14 @@ export default function OverviewPage({ session }: { session: Session }) {
   // The backend takes any window from 1 to 366 days, so the presets are a shortcut rather
   // than the whole choice. A cycle that started mid-month needs a number nobody preset.
   const [customDays, setCustomDays] = useState('')
-  const periodValid = Boolean(PERIOD_LABEL[period]) || (/^\d{1,3}d$/.test(period) && Number(period.slice(0, -1)) >= 1 && Number(period.slice(0, -1)) <= 366)
+  // Whether the exact-days option is chosen is its own state, not something worked out from
+  // the day count. Inferring it meant that picking a count which happened to match a preset,
+  // and 30 is both a preset and the fallback, snapped the dropdown straight back to it.
+  const [customWindow, setCustomWindow] = useState(false)
+  const customDaysValue = Number(customDays)
+  const periodValid = customWindow
+    ? Number.isFinite(customDaysValue) && customDaysValue >= 1 && customDaysValue <= 366
+    : Boolean(PERIOD_LABEL[period])
   const [notice, setNotice] = useState<{ text: string; kind: 'success' | 'error' | 'loading' }>()
   const [estimate, setEstimate] = useState<ScanEstimate>()
   const [verifyX, setVerifyX] = useState(true)
@@ -191,8 +198,8 @@ export default function OverviewPage({ session }: { session: Session }) {
         <aside className="scan-card">
           <h2>Run a scan</h2>
           <p>Collect recent replies, quotes, retweets, and organic mentions from tracked accounts.</p>
-          <label>Lookback window<select value={PERIOD_LABEL[period] ? period : 'custom'} onChange={(event) => { const next = event.target.value; if (next === 'custom') { const days = customDays || String(cycleDays && cycleDays > 0 ? cycleDays : 30); setCustomDays(days); setPeriod(`${days}d`) } else { setPeriod(next) } }}><option value="24h">Last 24 hours</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option><option value="60d">Last 60 days</option><option value="90d">Last 90 days</option><option value="180d">Last 6 months</option><option value="365d">Last 12 months</option><option value="custom">An exact number of days…</option></select></label>
-          {!PERIOD_LABEL[period] && <label className="custom-days">Days to look back<input type="number" min={1} max={366} step={1} inputMode="numeric" value={customDays} onChange={(event) => { const days = event.target.value.replace(/[^0-9]/g, '').slice(0, 3); setCustomDays(days); setPeriod(days ? `${days}d` : '') }} /><small className="field-hint">1 to 366. {cycleDays !== null && cycleDays > 0 ? `This cycle started ${cycleDays} day${cycleDays === 1 ? '' : 's'} ago, so ${cycleDays} covers all of it.` : 'Covers the whole cycle when it is at least as long as the cycle.'}</small></label>}
+          <label>Lookback window<select value={customWindow ? 'custom' : period} onChange={(event) => { const next = event.target.value; if (next === 'custom') { const days = customDays || String(cycleDays && cycleDays >= 1 ? cycleDays : 30); setCustomWindow(true); setCustomDays(days); setPeriod(`${days}d`) } else { setCustomWindow(false); setPeriod(next) } }}><option value="24h">Last 24 hours</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option><option value="60d">Last 60 days</option><option value="90d">Last 90 days</option><option value="180d">Last 6 months</option><option value="365d">Last 12 months</option><option value="custom">An exact number of days…</option></select></label>
+          {customWindow && <label className="custom-days">Days to look back<input autoFocus type="number" min={1} max={366} step={1} inputMode="numeric" value={customDays} onChange={(event) => { const days = event.target.value.replace(/[^0-9]/g, '').slice(0, 3); setCustomDays(days); setPeriod(days ? `${days}d` : '') }} /><small className="field-hint">1 to 366. {cycleDays !== null && cycleDays > 0 ? `This cycle started ${cycleDays} day${cycleDays === 1 ? '' : 's'} ago, so ${cycleDays} covers all of it.` : 'Covers the whole cycle when it is at least as long as the cycle.'}</small></label>}
           <p className="field-hint window-clamp">A scan never reaches back past the start of the current cycle, so a window longer than the cycle simply covers the whole cycle. Points from before the last reset cannot be counted twice.</p>
           <button className="button primary" onClick={openScan} disabled={running || loadingEstimate || !periodValid} title={periodValid ? undefined : 'Enter a number of days between 1 and 366'}><Play size={17} />{running ? 'Scan running' : loadingEstimate ? 'Estimating cost…' : 'Run engagement scan'}</button>
           {running
