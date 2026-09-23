@@ -523,3 +523,86 @@ async def test_actions_sort_orders_and_reject_unknown_values(
     unknown = await repository.paginated_actions(sort="'; drop table actions; --")
     assert unknown["sort"] == "occurred_desc"
     assert [item["discord_username"] for item in unknown["items"]] == ["bob", "alice"]
+
+
+@pytest.mark.asyncio
+async def test_delete_member_erases_their_data_but_not_frozen_history(
+    repository: DatabaseRepository,
+) -> None:
+    from majors_lair_bot.orm import ActionRow
+    from majors_lair_bot.utils import utc_now
+
+    now = utc_now()
+    cycle = (await repository.get_config())["current_cycle_id"]
+    await repository.link_user(
+        discord_user_id="900", discord_username="alt", twitter_handle="alt_x", twitter_user_id="t9"
+    )
+    await repository.link_user(
+        discord_user_id="901", discord_username="keeper", twitter_handle="k_x", twitter_user_id="t8"
+    )
+    async with repository.sessions.begin() as session:
+        for index, owner in enumerate(["900", "900", "901"]):
+            session.add(
+                ActionRow(
+                    action_key=f"d{index}",
+                    cycle_id=cycle,
+                    discord_user_id=owner,
+                    twitter_user_id="t9",
+                    twitter_handle="alt_x",
+                    action_type="reply",
+                    target_handle="major",
+                    source_post_id="p",
+                    action_tweet_id=f"t{index}",
+                    action_url="",
+                    text="hi",
+                    normalized_text="hi",
+                    content_hash=f"c{index}",
+                    has_media=False,
+                    occurred_at=now,
+                    points=2.0,
+                    reason="r",
+                    active=True,
+                    first_seen_at=now,
+                    last_seen_at=now,
+                )
+            )
+    await repository.adjust_points(
+        discord_user_id="900", points=5, reason="test", actor_discord_id="1", cycle_id=cycle
+    )
+    # Freeze a cycle, so we can prove the delete does not rewrite closed history.
+    await repository.reset_leaderboard(actor_discord_id="1")
+    frozen_before = await repository.list_snapshots()
+
+    removed = await repository.delete_member("900")
+
+    assert removed is not None
+    assert removed["discord_username"] == "alt"
+    assert removed["actions"] == 2
+    assert removed["adjustments"] == 1
+    assert await repository.get_user("900") is None
+    assert await repository.get_user("901") is not None
+    remaining = await repository.paginated_actions(page_size=50)
+    assert {item["discord_user_id"] for item in remaining["items"]} <= {"901"}
+    assert await repository.list_adjustments("900") == []
+    assert await repository.list_snapshots() == frozen_before
+    assert await repository.delete_member("900") is None
+
+
+@pytest.mark.asyncio
+async def test_deactivate_members_only_touches_the_active_ones(
+    repository: DatabaseRepository,
+) -> None:
+    await repository.link_user(
+        discord_user_id="910", discord_username="gone", twitter_handle="g_x", twitter_user_id="t1"
+    )
+    await repository.link_user(
+        discord_user_id="911", discord_username="stays", twitter_handle="s_x", twitter_user_id="t2"
+    )
+    await repository.set_user_active("911", False)
+
+    changed = await repository.deactivate_members({"910", "911", "does-not-exist"})
+
+    assert [row["discord_username"] for row in changed] == ["gone"]
+    gone = await repository.get_user("910")
+    assert gone is not None and gone.active is False
+    assert await repository.deactivate_members(set()) == []

@@ -13,6 +13,7 @@ const groups: Record<string, string[]> = {
   'Secondary account points': ['reply_secondary', 'quote_secondary', 'retweet_secondary', 'mention_secondary'],
   'Quality signals': ['minimum_words', 'low_effort_multiplier', 'word_bonus_8', 'word_bonus_20', 'question_bonus', 'reference_bonus', 'media_bonus', 'link_bonus', 'quality_bonus_cap'],
   'Who counts as inactive': ['low_activity_threshold', 'newcomer_grace_days', 'protected_role_names', 'skip_protected_members'],
+  'Members the sync ignores': ['sync_ignored_discord_ids'],
   'Scan limits': ['default_check_period', 'default_refresh_period', 'daily_scored_action_cap', 'max_source_pages', 'max_action_pages_per_post', 'max_mention_pages', 'max_reply_search_pages', 'member_timeline_pages'],
   'Content rules': ['blacklist', 'reference_keywords'],
 }

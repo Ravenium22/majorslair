@@ -1118,6 +1118,81 @@ class DatabaseRepository:
             "total": total,
         }
 
+    async def delete_member(self, discord_user_id: str) -> dict[str, Any] | None:
+        """Erase a member and their scoring data. Returns what was removed, or None.
+
+        Frozen leaderboard snapshots and the audit trail keep their copy on purpose: this
+        removes somebody from the running community, it does not rewrite what already
+        happened in a closed cycle.
+        """
+        async with self.sessions.begin() as session:
+            row = await session.get(UserRow, discord_user_id, with_for_update=True)
+            if row is None:
+                return None
+            removed = {
+                "discord_user_id": row.discord_user_id,
+                "discord_username": row.discord_username,
+                "twitter_handle": row.twitter_handle or "",
+                "twitter_user_id": row.twitter_user_id or "",
+                "score": round(float(row.score or 0), 2),
+                "special_role": bool(row.special_role),
+                "active": bool(row.active),
+            }
+            removed["actions"] = int(
+                await session.scalar(
+                    select(func.count())
+                    .select_from(ActionRow)
+                    .where(ActionRow.discord_user_id == discord_user_id)
+                )
+                or 0
+            )
+            removed["adjustments"] = int(
+                await session.scalar(
+                    select(func.count())
+                    .select_from(ScoreAdjustmentRow)
+                    .where(ScoreAdjustmentRow.discord_user_id == discord_user_id)
+                )
+                or 0
+            )
+            await session.execute(
+                delete(ActionRow).where(ActionRow.discord_user_id == discord_user_id)
+            )
+            await session.execute(
+                delete(ScoreAdjustmentRow).where(
+                    ScoreAdjustmentRow.discord_user_id == discord_user_id
+                )
+            )
+            await session.delete(row)
+        return removed
+
+    async def deactivate_members(self, discord_user_ids: set[str]) -> list[dict[str, str]]:
+        """Mark members inactive because they are no longer in the Discord server.
+
+        This only touches this database. Nobody is removed from Discord by it.
+        """
+        if not discord_user_ids:
+            return []
+        now = utc_now()
+        changed: list[dict[str, str]] = []
+        async with self.sessions.begin() as session:
+            rows = (
+                await session.scalars(
+                    select(UserRow).where(
+                        UserRow.discord_user_id.in_(discord_user_ids), UserRow.active.is_(True)
+                    )
+                )
+            ).all()
+            for row in rows:
+                row.active = False
+                row.updated_at = now
+                changed.append(
+                    {
+                        "discord_user_id": row.discord_user_id,
+                        "discord_username": row.discord_username,
+                    }
+                )
+        return changed
+
     async def set_user_active(self, discord_user_id: str, active: bool) -> LinkedUser | None:
         async with self.sessions.begin() as session:
             row = await session.get(UserRow, discord_user_id, with_for_update=True)

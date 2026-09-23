@@ -24,6 +24,7 @@ DEFAULT_CONFIG: dict[str, str] = {
     "low_activity_threshold": "5",
     "newcomer_grace_days": "30",
     "skip_protected_members": "false",
+    "sync_ignored_discord_ids": "",
     "blacklist": "lfg,gm,gn,alpha,bullish,fire,moon,send it,lets go,let's go",
     "reference_keywords": (
         "onchain,on-chain,dyor,liquidity,volume,holders,tokenomics,roadmap,thesis,data,research"
@@ -85,6 +86,11 @@ CONFIG_DESCRIPTIONS: dict[str, str] = {
     "protected_role_names": (
         "Comma-separated Discord role names (for example Active Supporter, Builder). "
         "Sync from Discord marks members holding any of them as protected."
+    ),
+    "sync_ignored_discord_ids": (
+        "Comma-separated Discord user IDs that Sync from Discord will never register, even "
+        "while they are in the server. Deleting a member can add their ID here. Clear an ID "
+        "from this list to let the next sync add them back."
     ),
     "low_activity_threshold": (
         "Members with this many points or fewer appear on the low-activity report. Protected "

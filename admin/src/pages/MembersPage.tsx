@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
-import { AlertTriangle, ArrowLeftRight, BadgeCheck, Download, ExternalLink, FileUp, Pencil, Plus, RefreshCw, Search, Shield, ShieldCheck, ShieldOff, Tags, UserRoundCheck, UserRoundX, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react'
+import { AlertTriangle, ArrowLeftRight, BadgeCheck, Download, ExternalLink, FileUp, Pencil, Plus, RefreshCw, Search, Shield, ShieldCheck, ShieldOff, Tags, Trash2, UserRoundCheck, UserRoundX, X } from 'lucide-react'
 import useSWR from 'swr'
 import { api, formatCount, formatDate, formatScore, formatUsd, mutateApi } from '../api'
 import { Empty, Loading, PageHeader, Pagination, SortTh, Toast, useEscape } from '../components'
@@ -167,6 +167,11 @@ export default function MembersPage({ session }: { session: Session }) {
     } catch (error) { setNotice({ text: error instanceof Error ? error.message : 'Update failed', kind: 'error' }) }
   }
   const [confirmDeactivate, setConfirmDeactivate] = useState<LinkedUser>()
+  // Deleting is separate from deactivating: it erases the record instead of parking it.
+  const [confirmDelete, setConfirmDelete] = useState<LinkedUser>()
+  const [deleteConfirmText, setDeleteConfirmText] = useState('')
+  const [deleteIgnore, setDeleteIgnore] = useState(true)
+  const [deleting, setDeleting] = useState(false)
   const toggleActive = (user: LinkedUser) => {
     if (user.active) { setConfirmDeactivate(user); return }
     return patch(user, { active: true }, `${user.discord_username} reactivated.`)
@@ -377,6 +382,28 @@ export default function MembersPage({ session }: { session: Session }) {
   const closeEditTool = () => { if (saving) return; if (editDirty()) { setConfirmDiscard('tool'); return } setTool('none') }
   const discardEdit = () => { const where = confirmDiscard; setConfirmDiscard(undefined); if (where === 'drawer') { setSelected(undefined) } setTool('none') }
 
+  const removeMember = async (user: LinkedUser) => {
+    setDeleting(true)
+    try {
+      const result = await mutateApi<{ actions: number; adjustments: number; ignored_in_sync: boolean }>(
+        `/api/users/${user.discord_user_id}?ignore_in_sync=${deleteIgnore}`,
+        session.csrf_token,
+        'DELETE',
+      )
+      setConfirmDelete(undefined)
+      setDeleteConfirmText('')
+      setSelected(undefined)
+      setTool('none')
+      setPicked((current) => current.filter((id) => id !== user.discord_user_id))
+      setNotice({
+        text: `${user.discord_username} deleted, along with ${result.actions} scored action${result.actions === 1 ? '' : 's'} and ${result.adjustments} adjustment${result.adjustments === 1 ? '' : 's'}.${result.ignored_in_sync ? ' Sync from Discord will not add them back.' : ''}`,
+        kind: 'success',
+      })
+      await mutate()
+    } catch (error) { setNotice({ text: error instanceof Error ? error.message : 'Delete failed', kind: 'error' }) }
+    finally { setDeleting(false) }
+  }
+
   const saveEdit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!selected) return
@@ -405,7 +432,7 @@ export default function MembersPage({ session }: { session: Session }) {
     finally { setSaving(false) }
   }
 
-  const anyModal = Boolean(confirmDeactivate || showLink || showImport || showRoles || selected || syncResult || verifyResult || verifyPlan)
+  const anyModal = Boolean(confirmDelete || confirmDeactivate || showLink || showImport || showRoles || selected || syncResult || verifyResult || verifyPlan)
   const anyBusy = importing || saving || roleBusy || verifying || memberScanning || syncing || adjusting
   useEscape(anyModal && !anyBusy && !confirmDiscard, () => {
     if (selected && editDirty()) { setConfirmDiscard('drawer'); return }
@@ -497,6 +524,7 @@ export default function MembersPage({ session }: { session: Session }) {
         <button type="button" className={`button ${tool === 'edit' ? 'primary' : ''}`} onClick={() => (tool === 'edit' ? closeEditTool() : setTool('edit'))}><Pencil size={15} /> Edit member</button>
         <button type="button" className={`button ${tool === 'points' ? 'primary' : ''}`} onClick={() => { if (tool === 'edit' && editDirty()) { setConfirmDiscard('tool'); return } setTool(tool === 'points' ? 'none' : 'points') }}><ArrowLeftRight size={15} /> Points</button>
         {selected.twitter_user_id && <button type="button" className={`button ${tool === 'scan' ? 'primary' : ''}`} onClick={() => setTool(tool === 'scan' ? 'none' : 'scan')}><BadgeCheck size={15} /> Scan this member</button>}
+        <button type="button" className="button danger drawer-delete" onClick={() => { setDeleteConfirmText(''); setDeleteIgnore(true); setConfirmDelete(selected) }}><Trash2 size={15} /> Delete record</button>
       </div>
       {tool === 'edit' && <form className="edit-grid" ref={editForm} onSubmit={saveEdit}>
         <label>Discord handle<input name="discord_username" defaultValue={selected.discord_username} required maxLength={120} /></label>
@@ -530,6 +558,15 @@ export default function MembersPage({ session }: { session: Session }) {
       </tbody></table></div> : history ? <p className="muted small">No matched actions in this cycle. If they did interact, check the X handle above is the account they used, then run a scan that covers the date.</p> : null}
     </div></div>}
 
+    {confirmDelete && <div className="modal-backdrop stacked" onMouseDown={() => { if (!deleting) setConfirmDelete(undefined) }}><div className="modal" onMouseDown={(e) => e.stopPropagation()}>
+      <div className="modal-icon danger-icon"><Trash2 /></div><h2>Delete {confirmDelete.discord_username} for good?</h2>
+      <p>This erases the record itself, not just their standing. Gone for good: <strong>{formatScore(confirmDelete.score)} points</strong>, every scored action behind them, and every manual adjustment. Frozen leaderboards from closed cycles keep their copy, and so does the Audit trail, so past cycles still add up. Nothing happens to their Discord account.</p>
+      <p className="muted small">To park somebody instead, keeping their history and points so you can bring them back, close this and use Deactivate.</p>
+      <label className="check-row"><input type="checkbox" checked={deleteIgnore} onChange={(e) => setDeleteIgnore(e.target.checked)} disabled={deleting} /> Never let Sync from Discord add them back{selected?.active ? ' (they are still in the server, so leave this on)' : ''}</label>
+      <label>Type DELETE to confirm<input autoFocus value={deleteConfirmText} onChange={(e) => setDeleteConfirmText(e.target.value)} placeholder="DELETE" disabled={deleting} /></label>
+      <div className="modal-actions"><button className="button ghost" onClick={() => setConfirmDelete(undefined)} disabled={deleting}>Cancel</button><button className="button danger" disabled={deleting || deleteConfirmText.trim().toUpperCase() !== 'DELETE'} onClick={() => void removeMember(confirmDelete)}>{deleting ? 'Deleting…' : 'Delete this record'}</button></div>
+    </div></div>}
+
     {confirmDeactivate && <div className="modal-backdrop" onMouseDown={() => setConfirmDeactivate(undefined)}><div className="modal" onMouseDown={(e) => e.stopPropagation()}>
       <div className="modal-icon"><UserRoundX /></div><h2>Deactivate {confirmDeactivate.discord_username}?</h2>
       <p>They drop out of the leaderboard, the low-activity report and every scan. Their history and points are kept, and you can reactivate them at any time.</p>
@@ -559,6 +596,7 @@ export default function MembersPage({ session }: { session: Session }) {
         </div>
       </fieldset>
       {!usingPicked && pageClauses.length > 0 && <label className="role-inherit"><input type="checkbox" checked={inheritFilters} onChange={(e) => setInheritFilters(e.target.checked)} disabled={roleBusy} /><span>Narrow this to the filters set on the Members page<small>{pageClauses.join(', ')}</small></span></label>}
+      {rolePreview?.unverified?.length ? <p className="estimate-warning"><strong>{rolePreview.unverified.length}</strong> member{rolePreview.unverified.length === 1 ? '' : 's'} left out because Discord would not say which roles they hold ({rolePreview.unverified.slice(0, 6).map((u) => u.discord_username).join(', ')}{rolePreview.unverified.length > 6 ? '…' : ''}). Rather than risk changing someone who is protected, they are not touched. Try again in a minute.</p> : null}
       {rolePreview && !roleResult && <><p className="import-summary"><strong>{rolePreview.matched}</strong> members match{rolePreview.skipped?.length ? <> · <strong>{rolePreview.skipped.length}</strong> left alone because of their roles ({rolePreview.skipped.slice(0, 6).map((s) => s.discord_username).join(', ')}{rolePreview.skipped.length > 6 ? '…' : ''})</> : null}. {rolePreview.matched > 500 ? 'Showing the first 500.' : ''}</p><div className="table-wrap import-results"><table><tbody>{rolePreview.members?.map((m) => <tr key={m.discord_user_id}><td><span className="member-cell"><strong>{m.discord_username}</strong><small className="mono">{m.discord_user_id}</small></span></td><td className="score">{formatScore(m.score)}</td><td>{m.special_role ? <span className="status complete"><i />Protected</span> : ''}</td></tr>)}</tbody></table></div></>}
       {roleResult && <><p className="import-summary">{roleAction === 'add' ? 'Gave' : 'Removed'} the role for <strong>{roleResult.changed?.length ?? 0}</strong> of {roleResult.matched} members{roleResult.failed?.length ? ` · ${roleResult.failed.length} failed` : ''}{roleResult.skipped?.length ? ` · ${roleResult.skipped.length} left alone because of their roles` : ''}.</p>{roleResult.skipped && roleResult.skipped.length > 0 && <div className="table-wrap import-results"><table><tbody>{roleResult.skipped.map((s) => <tr key={s.discord_user_id}><td><span className="member-cell"><strong>{s.discord_username}</strong><small className="mono">{s.discord_user_id}</small></span></td><td className="muted">{s.roles}</td></tr>)}</tbody></table></div>}{roleResult.failed && roleResult.failed.length > 0 && <div className="table-wrap import-results"><table><tbody>{roleResult.failed.map((f) => <tr key={f.discord_user_id}><td><span className="member-cell"><strong>{f.discord_username}</strong><small className="mono">{f.discord_user_id}</small></span></td><td className="muted">{f.error}</td></tr>)}</tbody></table></div>}</>}
       <div className="modal-actions"><button type="button" className="button ghost" onClick={() => setShowRoles(false)} disabled={roleBusy}>{roleResult ? 'Done' : 'Cancel'}</button>{!roleResult && <button type="button" className="button" onClick={previewRoles} disabled={roleBusy}>{roleBusy ? 'Working…' : 'Preview who matches'}</button>}{!roleResult && <button type="button" className="button primary" onClick={applyRoles} disabled={roleBusy || !roleId || !rolePreview} title={!rolePreview ? 'Run the preview first so you can see exactly who this hits' : undefined}>{roleBusy ? 'Working…' : !rolePreview ? (roleAction === 'add' ? 'Give the role' : 'Remove the role') : roleAction === 'add' ? `Give the role to ${rolePreview.matched} members` : `Remove the role from ${rolePreview.matched} members`}</button>}</div>
@@ -602,13 +640,17 @@ export default function MembersPage({ session }: { session: Session }) {
 
     {syncResult && <div className="modal-backdrop" onMouseDown={() => setSyncResult(undefined)}><div className="modal modal-wide" onMouseDown={(e) => e.stopPropagation()}>
       <div className="modal-icon"><RefreshCw /></div><h2>Server members compared with the registry</h2>
-      <p className="import-summary">{syncResult.discord_members} humans in the server · {syncResult.added.length} newly registered · {syncResult.already_registered_active} already present + {syncResult.already_registered_inactive} inactive · {syncResult.bots_skipped} bots skipped · {syncResult.left_server.length} registered members no longer in the server.</p>
+      <p className="import-summary">{syncResult.discord_members} humans in the server · {syncResult.added.length} newly registered · {syncResult.already_registered_active} already present + {syncResult.already_registered_inactive} inactive · {syncResult.bots_skipped} bots skipped{syncResult.ignored ? ` · ${syncResult.ignored} ignored on purpose` : ''} · {syncResult.deactivated.length} deactivated after leaving the server.</p>
       <p className="import-summary">Registry now holds <strong>{syncResult.registry_active} active + {syncResult.registry_inactive} inactive</strong> members.</p>
-      {syncResult.protected_roles_configured.length === 0 && <p className="estimate-warning">No protected role names are configured. Set <code>protected_role_names</code> in Scoring rules (for example: Active Supporter, Builder, Friend, Collaborator, Team) and sync again to protect members by their Discord roles.</p>}
+      {syncResult.unmatched_role_names?.length > 0 && <p className="estimate-warning">No role in the server is named {syncResult.unmatched_role_names.map((row) => <code key={row.configured}>{row.configured}</code>).reduce<ReactNode[]>((acc, el, i) => i ? [...acc, ' or ', el] : [el], [])}, so nobody is protected by it. Discord role names often carry an emoji, and the name has to match exactly.{syncResult.unmatched_role_names.some((row) => row.did_you_mean.length) && <> Did you mean {syncResult.unmatched_role_names.flatMap((row) => row.did_you_mean).map((name) => <code key={name}>{name}</code>).reduce<ReactNode[]>((acc, el, i) => i ? [...acc, ' or ', el] : [el], [])}? Copy the name exactly into <strong>protected_role_names</strong> on <a href="#scoring">Scoring rules</a>, then sync again.</>}</p>}
+      {syncResult.protected_roles_configured.length === 0 && !syncResult.unmatched_role_names?.length && <p className="estimate-warning">No protected role names are configured. Set <code>protected_role_names</code> in Scoring rules (for example: Active Supporter, Builder, Friend, Collaborator, Team) and sync again to protect members by their Discord roles.</p>}
       {syncResult.protected_by_role.length > 0 && <><h3 className="sub-heading">Newly protected because of their Discord roles</h3><div className="table-wrap import-results"><table><tbody>{syncResult.protected_by_role.map((row) => <tr key={row.discord_user_id}><td><span className="member-cell"><strong>{row.discord_username}</strong><small className="mono">{row.discord_user_id}</small></span></td><td className="muted">{row.roles}</td></tr>)}</tbody></table></div></>}
       {syncResult.renamed.length > 0 && <><h3 className="sub-heading">Discord handles updated</h3><div className="table-wrap import-results"><table><tbody>{syncResult.renamed.map((row) => <tr key={row.discord_user_id}><td className="muted">{row.old} →</td><td><span className="member-cell"><strong>{row.discord_username}</strong><small className="mono">{row.discord_user_id}</small></span></td></tr>)}</tbody></table></div></>}
       {syncResult.added.length > 0 && <><h3 className="sub-heading">Newly registered (no X yet)</h3><div className="table-wrap import-results"><table><tbody>{syncResult.added.map((row) => <tr key={row.discord_user_id}><td><span className="member-cell"><strong>{row.discord_username}</strong><small className="mono">{row.discord_user_id}</small></span></td></tr>)}</tbody></table></div></>}
-      {syncResult.left_server.length > 0 && <><h3 className="sub-heading">In the registry but not in the server</h3><div className="table-wrap import-results"><table><tbody>{syncResult.left_server.map((row) => <tr key={row.discord_user_id}><td><span className="member-cell"><strong>{row.discord_username}</strong><small className="mono">{row.discord_user_id}</small></span></td></tr>)}</tbody></table></div></>}
+      {syncResult.partial_list_guard && <p className="estimate-warning">Discord served far fewer members than the registry holds, which usually means the member list was cut short. <strong>Nobody was deactivated.</strong> Run the sync again in a minute; if it keeps happening, check the bot's Server Members Intent.</p>}
+      {syncResult.deactivated.length > 0 && <><h3 className="sub-heading">Left the server, now marked inactive</h3><p className="group-note">They are out of the leaderboard, the low-activity report and future scans. Their points and history are kept, so reactivating them puts everything back. Nothing happened to their Discord account.</p><div className="table-wrap import-results"><table><tbody>{syncResult.deactivated.map((row) => <tr key={row.discord_user_id}><td><span className="member-cell"><strong>{row.discord_username}</strong><small className="mono">{row.discord_user_id}</small></span></td></tr>)}</tbody></table></div></>}
+      {syncResult.left_server.length > 0 && !syncResult.deactivated.length && <><h3 className="sub-heading">In the registry but not in the server</h3><div className="table-wrap import-results"><table><tbody>{syncResult.left_server.map((row) => <tr key={row.discord_user_id}><td><span className="member-cell"><strong>{row.discord_username}</strong><small className="mono">{row.discord_user_id}</small></span></td></tr>)}</tbody></table></div></>}
+      {syncResult.back_in_server.length > 0 && <><h3 className="sub-heading">Back in the server, still marked inactive</h3><p className="group-note">Left alone on purpose, in case you deactivated them yourself. Open anyone here and reactivate them to put them back on the leaderboard.</p><div className="table-wrap import-results"><table><tbody>{syncResult.back_in_server.map((row) => <tr key={row.discord_user_id}><td><a className="member-cell linked-cell" href={`#members?search=${row.discord_user_id}&open=${row.discord_user_id}`} onClick={() => setSyncResult(undefined)}><strong>{row.discord_username}</strong><small className="mono">{row.discord_user_id}</small></a></td></tr>)}</tbody></table></div></>}
       <div className="modal-actions"><button className="button primary" onClick={() => setSyncResult(undefined)}>Done</button></div>
     </div></div>}
   </div>

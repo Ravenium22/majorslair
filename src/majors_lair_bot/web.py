@@ -485,6 +485,50 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             page_size=page_size,
         )
 
+    async def _fetch_guild_members() -> list[dict[str, Any]]:
+        """Every member of the server, with their roles, straight from Discord.
+
+        One request per 1000 members. Raises rather than returning a partial list, because
+        callers use this to decide who is protected and a short list would silently mean
+        "nobody is protected".
+        """
+        headers = {"Authorization": f"Bot {runtime.settings.discord_token}"}
+        guild_id = runtime.settings.discord_guild_id
+        members: list[dict[str, Any]] = []
+        after = "0"
+        for _ in range(100):  # 100 pages x 1000 members is far beyond this community
+            response = await runtime.http.get(
+                f"{DISCORD_API}/guilds/{guild_id}/members",
+                headers=headers,
+                params={"limit": 1000, "after": after},
+            )
+            if response.status_code == 429:
+                retry = float(response.headers.get("Retry-After", "1") or 1)
+                await asyncio.sleep(min(10.0, retry))
+                continue
+            if response.status_code == 403:
+                raise HTTPException(
+                    status_code=502,
+                    detail=(
+                        "Discord refused the member list. Enable 'Server Members Intent' "
+                        "under Bot > Privileged Gateway Intents in the Developer Portal, "
+                        "then try again."
+                    ),
+                )
+            if response.status_code >= 400:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Discord member list failed ({response.status_code})",
+                )
+            page = response.json()
+            if not isinstance(page, list) or not page:
+                break
+            members.extend(item for item in page if isinstance(item, dict))
+            after = str(page[-1].get("user", {}).get("id", ""))
+            if len(page) < 1000 or not after:
+                break
+        return members
+
     async def _members_matching(filters: MemberFilters) -> list[dict[str, Any]]:
         config_values = await runtime.repository.get_config()
         threshold = None
@@ -576,9 +620,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         skipped: list[dict[str, str]] = []
         semaphore = asyncio.Semaphore(4)
 
+        unverified: list[dict[str, str]] = []
         if excluded_ids:
-            # Check each member's roles right now, so a booster who got the role this
-            # morning is still left alone.
+            # Read everyone's roles right now, so a role given after the preview still counts.
+            #
+            # This used to ask Discord about each member separately and treat any failed
+            # request as "holds no roles". A rate limit therefore stripped someone's
+            # protection in silence, which is how a member with the excluded role ended up in
+            # the list. One member-list call replaces all of those requests, and anyone whose
+            # roles still cannot be read is left out of the action rather than swept into it.
             names_response = await runtime.http.get(
                 f"{DISCORD_API}/guilds/{guild_id}/roles", headers=headers
             )
@@ -587,20 +637,52 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 if names_response.status_code < 400
                 else {}
             )
+            held_by: dict[str, set[str]] = {}
+            for entry in await _fetch_guild_members():
+                member_id = str((entry.get("user") or {}).get("id") or "")
+                if member_id:
+                    held_by[member_id] = {str(r) for r in entry.get("roles", [])}
 
-            async def current_roles(member: dict[str, Any]) -> set[str]:
+            async def current_roles(member_id: str) -> set[str] | None:
+                """Roles for one member, or None when Discord would not say."""
                 async with semaphore:
-                    response = await runtime.http.get(
-                        f"{DISCORD_API}/guilds/{guild_id}/members/{member['discord_user_id']}",
-                        headers=headers,
-                    )
+                    for _attempt in range(4):
+                        response = await runtime.http.get(
+                            f"{DISCORD_API}/guilds/{guild_id}/members/{member_id}",
+                            headers=headers,
+                        )
+                        if response.status_code == 429:
+                            retry = float(response.headers.get("Retry-After", "1") or 1)
+                            await asyncio.sleep(min(10.0, retry))
+                            continue
+                        break
+                if response.status_code == 404:
+                    return set()  # not in the server, so it holds no protected role
                 if response.status_code >= 400:
-                    return set()
+                    return None
                 return {str(r) for r in response.json().get("roles", [])}
 
-            role_sets = await asyncio.gather(*(current_roles(m) for m in members))
+            missing = [m for m in members if m["discord_user_id"] not in held_by]
+            if missing:
+                extra = await asyncio.gather(
+                    *(current_roles(m["discord_user_id"]) for m in missing)
+                )
+                for member, roles in zip(missing, extra, strict=True):
+                    if roles is not None:
+                        held_by[member["discord_user_id"]] = roles
+
             kept: list[dict[str, Any]] = []
-            for member, held in zip(members, role_sets, strict=True):
+            for member in members:
+                held = held_by.get(member["discord_user_id"])
+                if held is None:
+                    unverified.append(
+                        {
+                            "discord_user_id": member["discord_user_id"],
+                            "discord_username": member["discord_username"],
+                            "reason": "Discord would not say which roles they hold",
+                        }
+                    )
+                    continue
                 hit = held & excluded_ids
                 if hit:
                     skipped.append(
@@ -619,6 +701,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "matched": len(members),
                 "members": members[:500],
                 "skipped": skipped,
+                "unverified": unverified,
             }
         changed: list[dict[str, str]] = []
         failed: list[dict[str, str]] = []
@@ -673,6 +756,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "changed": len(changed),
                 "failed": len(failed),
                 "skipped_by_role": len(skipped),
+                "unverified": len(unverified),
                 "exclude_role_ids": sorted(excluded_ids),
             },
         )
@@ -681,6 +765,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "changed": changed,
             "failed": failed,
             "skipped": skipped,
+            "unverified": unverified,
         }
 
     @app.get("/api/users/export")
@@ -887,6 +972,47 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         assert user is not None
         return asdict(user)
 
+    @app.delete("/api/users/{discord_user_id}")
+    async def delete_user(
+        discord_user_id: str, admin: MutatingAdmin, ignore_in_sync: bool = True
+    ) -> dict[str, Any]:
+        """Erase a member, their scored actions and their point adjustments.
+
+        Deactivating keeps somebody in the registry with their history; this is for records
+        that should not exist at all, such as an admin's own account or an alt. Frozen
+        leaderboard snapshots and the audit trail keep their copy, so closed cycles still
+        add up. Nothing happens to the person's Discord account.
+        """
+        removed = await runtime.repository.delete_member(discord_user_id)
+        if removed is None:
+            raise HTTPException(status_code=404, detail="No member with that Discord ID")
+        ignored = False
+        if ignore_in_sync:
+            # They are probably still in the server, so without this the next sync would put
+            # the record straight back.
+            config_values = await runtime.repository.get_config()
+            current = [
+                value.strip()
+                for value in config_values.get("sync_ignored_discord_ids", "").split(",")
+                if value.strip()
+            ]
+            if discord_user_id not in current:
+                current.append(discord_user_id)
+                await runtime.repository.set_config_values(
+                    {"sync_ignored_discord_ids": ",".join(current)},
+                    actor_discord_id=str(admin["discord_user_id"]),
+                )
+            ignored = True
+        await runtime.repository.append_audit(
+            event_type="admin_member_deleted",
+            actor_discord_id=str(admin["discord_user_id"]),
+            subject_discord_id=discord_user_id,
+            old_value=removed["discord_username"],
+            new_value="",
+            details={**removed, "ignored_in_sync": ignored},
+        )
+        return {**removed, "ignored_in_sync": ignored}
+
     @app.get("/api/users/{discord_user_id}/adjustments")
     async def member_adjustments(discord_user_id: str, _: Admin) -> list[dict[str, Any]]:
         return await runtime.repository.list_adjustments(discord_user_id)
@@ -960,35 +1086,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         """
         headers = {"Authorization": f"Bot {runtime.settings.discord_token}"}
         guild_id = runtime.settings.discord_guild_id
-        members: list[dict[str, Any]] = []
-        after = "0"
-        for _ in range(100):  # 100 pages x 1000 members is far beyond this community
-            response = await runtime.http.get(
-                f"{DISCORD_API}/guilds/{guild_id}/members",
-                headers=headers,
-                params={"limit": 1000, "after": after},
-            )
-            if response.status_code == 403:
-                raise HTTPException(
-                    status_code=502,
-                    detail=(
-                        "Discord refused the member list. Enable 'Server Members Intent' "
-                        "under Bot > Privileged Gateway Intents in the Developer Portal, "
-                        "then try again."
-                    ),
-                )
-            if response.status_code >= 400:
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"Discord member list failed ({response.status_code})",
-                )
-            page = response.json()
-            if not isinstance(page, list) or not page:
-                break
-            members.extend(item for item in page if isinstance(item, dict))
-            after = str(page[-1].get("user", {}).get("id", ""))
-            if len(page) < 1000 or not after:
-                break
+        members = await _fetch_guild_members()
 
         # Discord roles that mean "protected" (config: protected_role_names).
         config_values = await runtime.repository.get_config()
@@ -997,21 +1095,47 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             for name in config_values.get("protected_role_names", "").split(",")
             if name.strip()
         }
+        ignored_ids = {
+            value.strip()
+            for value in config_values.get("sync_ignored_discord_ids", "").split(",")
+            if value.strip()
+        }
         role_names: dict[str, str] = {}
+        server_role_names: list[str] = []
         if wanted_roles:
             roles_response = await runtime.http.get(
                 f"{DISCORD_API}/guilds/{guild_id}/roles", headers=headers
             )
             if roles_response.status_code < 400:
                 for role in roles_response.json():
-                    if isinstance(role, dict) and str(role.get("name", "")).lower() in wanted_roles:
+                    if not isinstance(role, dict):
+                        continue
+                    name = str(role.get("name", ""))
+                    server_role_names.append(name)
+                    if name.lower() in wanted_roles:
                         role_names[str(role["id"])] = str(role["name"])
+        # Role names are typed by hand and Discord names often carry an emoji, so a near miss
+        # like "Nucleus" against a real "Nucleus checkmark" protects nobody and says nothing.
+        matched_lower = {name.lower() for name in role_names.values()}
+        unmatched_role_names = [
+            {
+                "configured": wanted,
+                "did_you_mean": sorted(
+                    name
+                    for name in server_role_names
+                    if wanted and wanted in name.lower() and name.lower() not in matched_lower
+                )[:5],
+            }
+            for wanted in sorted(wanted_roles)
+            if wanted not in matched_lower
+        ]
 
         registry = {user.discord_user_id: user for user in await runtime.repository.list_users()}
         added: list[dict[str, str]] = []
         renamed: list[dict[str, str]] = []
         protected_by_role: list[dict[str, str]] = []
         bots = 0
+        ignored_present = 0
         for member in members:
             user = member.get("user") or {}
             user_id = str(user.get("id") or "")
@@ -1019,6 +1143,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 continue
             if user.get("bot") or user.get("system"):
                 bots += 1
+                continue
+            if user_id in ignored_ids:
+                ignored_present += 1
                 continue
             # Store the Discord handle (username), not the nickname, so the registry matches
             # what admins see in profiles and what /link-twitter records.
@@ -1098,7 +1225,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             for user in registry.values()
             if user.active and user.discord_user_id not in discord_ids
         ]
+        # Mark them inactive here. Nobody is removed from Discord by this: it drops them from
+        # the leaderboard, the reports and future scans, and their history and points are kept
+        # so reactivating restores everything.
+        #
+        # Guard against a truncated member list. If Discord served far fewer members than the
+        # registry holds (a rate limit, a permissions change, a half-finished page walk), a
+        # blind deactivation would empty the community, so refuse and say why instead.
+        registry_active_before = sum(1 for user in registry.values() if user.active)
+        visible_humans = len(members) - bots
+        partial_list = bool(left) and visible_humans < registry_active_before * 0.6
+        deactivated: list[dict[str, str]] = []
+        if left and not partial_list:
+            deactivated = await runtime.repository.deactivate_members(
+                {item["discord_user_id"] for item in left}
+            )
         present = [user for user in registry.values() if user.discord_user_id in discord_ids]
+        # Present in Discord but inactive here. Not reactivated automatically: an admin may
+        # have deactivated them on purpose, and sync should not quietly undo that.
+        back_in_server = [
+            {"discord_user_id": user.discord_user_id, "discord_username": user.discord_username}
+            for user in present
+            if not user.active
+        ]
         present_active = sum(1 for user in present if user.active)
         present_inactive = len(present) - present_active
         final_registry = await runtime.repository.list_users()
@@ -1113,6 +1262,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "renamed": len(renamed),
                 "protected_by_role": len(protected_by_role),
                 "left_server": len(left),
+                "deactivated": len(deactivated),
+                "ignored": ignored_present,
+                "partial_list_guard": partial_list,
             },
         )
         return {
@@ -1127,7 +1279,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "renamed": renamed,
             "protected_by_role": protected_by_role,
             "protected_roles_configured": sorted(role_names.values()),
+            "unmatched_role_names": unmatched_role_names,
             "left_server": left,
+            "deactivated": deactivated,
+            "back_in_server": back_in_server,
+            "ignored": ignored_present,
+            "partial_list_guard": partial_list,
         }
 
     @app.get("/api/actions")

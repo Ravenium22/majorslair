@@ -32,7 +32,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 export async function mutateApi<T>(
   path: string,
   csrf: string,
-  method: 'POST' | 'PUT' | 'PATCH',
+  method: 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   body?: unknown,
 ): Promise<T> {
   return api<T>(path, {

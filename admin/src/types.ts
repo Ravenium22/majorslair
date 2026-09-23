@@ -181,7 +181,12 @@ export type DiscordSyncResponse = {
   renamed: { discord_user_id: string; old: string; discord_username: string }[]
   protected_by_role: { discord_user_id: string; discord_username: string; roles: string }[]
   protected_roles_configured: string[]
+  unmatched_role_names: { configured: string; did_you_mean: string[] }[]
   left_server: { discord_user_id: string; discord_username: string }[]
+  deactivated: { discord_user_id: string; discord_username: string }[]
+  back_in_server: { discord_user_id: string; discord_username: string }[]
+  ignored: number
+  partial_list_guard: boolean
 }
 
 export type Snapshot = {
@@ -193,7 +198,7 @@ export type Snapshot = {
 }
 
 export type DiscordRole = { id: string; name: string; color: number; position: number; managed: boolean; assignable: boolean; booster: boolean }
-export type RoleBulkResult = { matched: number; members?: LinkedUser[]; changed?: { discord_user_id: string; discord_username: string }[]; failed?: { discord_user_id: string; discord_username: string; error: string }[]; skipped?: { discord_user_id: string; discord_username: string; roles: string }[] }
+export type RoleBulkResult = { matched: number; members?: LinkedUser[]; changed?: { discord_user_id: string; discord_username: string }[]; failed?: { discord_user_id: string; discord_username: string; error: string }[]; skipped?: { discord_user_id: string; discord_username: string; roles: string }[]; unverified?: { discord_user_id: string; discord_username: string; reason: string }[] }
 
 export type LowActivityReport = {
   threshold: number
