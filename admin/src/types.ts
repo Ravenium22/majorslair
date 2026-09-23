@@ -16,6 +16,11 @@ export type LinkedUser = {
   last_active_at: string
   handle_history: string
   special_role: boolean
+  special_role_manual?: boolean
+  role_protected_names?: string
+  follows_primary?: string
+  follows_secondary?: string
+  follows_checked_at?: string
   special_role_names: string
   x_status: '' | 'ok' | 'suspended' | 'unavailable'
   x_checked_at: string
@@ -259,3 +264,22 @@ export type Diagnosis = {
   author_search?: { found: boolean; returned: number }
 }
 
+
+export type FollowEstimate = {
+  accounts: { slot: string; handle: string; followers?: number; error?: string }[]
+  linked_members: number
+  credits: number
+}
+
+export type FollowCheckResult = {
+  checked: number
+  primary: { handle?: string; followers?: number; complete?: boolean; error?: string }
+  secondary: { handle?: string; followers?: number; complete?: boolean; error?: string }
+  follows_primary: number
+  follows_secondary: number
+  follows_both: number
+  missing_primary: number
+  missing_secondary: number
+  unknown: number
+  credits: number
+}

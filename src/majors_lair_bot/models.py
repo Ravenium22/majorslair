@@ -27,6 +27,14 @@ class LinkedUser:
     handle_history: str = ""
     special_role: bool = False
     special_role_names: str = ""
+    # Why they are protected. `special_role` is the effective flag; these say where it came
+    # from, so the dashboard can explain it and sync knows what it may take away.
+    special_role_manual: bool = False
+    role_protected_names: str = ""
+    # "" never checked, "yes" follows, "no" does not. Empty is not the same as "no".
+    follows_primary: str = ""
+    follows_secondary: str = ""
+    follows_checked_at: str = ""
     x_status: str = ""
     x_checked_at: str = ""
     discord_joined_at: str = ""

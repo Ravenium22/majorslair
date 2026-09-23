@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react'
-import { AlertTriangle, ArrowLeftRight, BadgeCheck, Download, ExternalLink, FileUp, Pencil, Plus, RefreshCw, Search, Shield, ShieldCheck, ShieldOff, Tags, Trash2, UserRoundCheck, UserRoundX, X } from 'lucide-react'
+import { AlertTriangle, ArrowLeftRight, BadgeCheck, Download, ExternalLink, FileUp, Pencil, Plus, RefreshCw, Search, Shield, ShieldCheck, ShieldOff, Tags, Trash2, UserRoundCheck, UserRoundSearch, UserRoundX, X } from 'lucide-react'
 import useSWR from 'swr'
 import { api, formatCount, formatDate, formatScore, formatUsd, mutateApi } from '../api'
 import { Empty, Loading, PageHeader, Pagination, SortTh, Toast, useEscape } from '../components'
 import { parseCsv, rowsFromSheet, type ImportRow } from '../csv'
-import type { Action, Adjustment, DiscordRole, DiscordSyncResponse, ImportResponse, ImportStatus, LinkedUser, MemberScanResult, Paginated, RoleBulkResult, Session, VerifyResponse } from '../types'
+import type { Action, Adjustment, DiscordRole, DiscordSyncResponse, FollowCheckResult, FollowEstimate, ImportResponse, ImportStatus, LinkedUser, MemberScanResult, Paginated, RoleBulkResult, Session, VerifyResponse } from '../types'
 
 const STATUS_LABEL: Record<ImportStatus, string> = { linked: 'Linked', relinked: 'Handle updated', unchanged: 'Already linked', registered: 'Registered, no X', skipped: 'Skipped', conflict: 'Conflict', failed: 'Failed' }
 const STATUS_TONE: Record<ImportStatus, string> = { linked: 'complete', relinked: 'complete', unchanged: 'active', registered: 'running', skipped: '', conflict: 'failed', failed: 'failed' }
@@ -25,6 +25,12 @@ const POINTS = [
   { id: 'positive', label: 'Has points' },
   { id: 'zero', label: '0 points' },
   { id: 'low', label: 'At or below threshold' },
+] as const
+const FOLLOWS = [
+  { id: 'any', label: 'Any follow state', query: {} },
+  { id: 'both', label: 'Follows both', query: { follows: 'both' } },
+  { id: 'missing', label: 'Not following', query: { follows: 'missing' } },
+  { id: 'unchecked', label: 'Follow not checked', query: { follows: 'unchecked' } },
 ] as const
 const JOINED = [
   { id: 'any', label: 'Any join date' },
@@ -52,6 +58,7 @@ export default function MembersPage({ session }: { session: Session }) {
   const [points, setPoints] = useState<(typeof POINTS)[number]['id']>(() => (POINTS.find((s) => s.id === initial.get('points'))?.id ?? 'any'))
   const [lowThreshold, setLowThreshold] = useState(() => initial.get('threshold') ?? '')
   const [joined, setJoined] = useState<(typeof JOINED)[number]['id']>(() => (JOINED.find((s) => s.id === initial.get('joined'))?.id ?? 'any'))
+  const [follows, setFollows] = useState<(typeof FOLLOWS)[number]['id']>(() => (FOLLOWS.find((s) => s.id === initial.get('follows'))?.id ?? 'any'))
   const [sort, setSort] = useState<(typeof SORTS)[number]['id']>(() => (SORTS.find((s) => s.id === initial.get('sort'))?.id ?? 'score_desc'))
   const [page, setPage] = useState(1)
   const [showLink, setShowLink] = useState(false)
@@ -77,6 +84,9 @@ export default function MembersPage({ session }: { session: Session }) {
   const [verifying, setVerifying] = useState(false)
   const [verifyResult, setVerifyResult] = useState<VerifyResponse>()
   const [verifyPlan, setVerifyPlan] = useState<{ linked: number; protectedLinked: number }>()
+  const [followPlan, setFollowPlan] = useState<FollowEstimate>()
+  const [followResult, setFollowResult] = useState<FollowCheckResult>()
+  const [followBusy, setFollowBusy] = useState(false)
   const [skipProtected, setSkipProtected] = useState(false)
   const [notice, setNotice] = useState<{ text: string; kind: 'success' | 'error' }>()
   const [showRoles, setShowRoles] = useState(false)
@@ -105,8 +115,9 @@ export default function MembersPage({ session }: { session: Session }) {
     ...(points !== 'any' ? { points } : {}),
     ...(points === 'low' && lowThreshold !== '' ? { threshold: lowThreshold } : {}),
     ...(joined !== 'any' ? { joined } : {}),
+    ...FOLLOWS.find((item) => item.id === follows)?.query,
     ...(sort !== 'score_desc' ? { sort } : {}),
-  }).toString(), [search, filter, segment, protection, points, lowThreshold, joined, sort])
+  }).toString(), [search, filter, segment, protection, points, lowThreshold, joined, follows, sort])
   const query = `${filterQuery}&page=${page}&page_size=25`
   // Navigating to Members (the sidebar link, a step on Overview, a pasted link) re-reads the
   // filters from the address bar. Clicking "Members" therefore always lands on a clean list
@@ -122,6 +133,7 @@ export default function MembersPage({ session }: { session: Session }) {
       setPoints(POINTS.find((item) => item.id === next.get('points'))?.id ?? 'any')
       setLowThreshold(next.get('threshold') ?? '')
       setJoined(JOINED.find((item) => item.id === next.get('joined'))?.id ?? 'any')
+      setFollows(FOLLOWS.find((item) => item.id === next.get('follows'))?.id ?? 'any')
       setSort(SORTS.find((item) => item.id === next.get('sort'))?.id ?? 'score_desc')
       setPendingOpen(next.get('open') ?? '')
       setPage(1)
@@ -140,11 +152,12 @@ export default function MembersPage({ session }: { session: Session }) {
     if (points !== 'any') params.set('points', points)
     if (points === 'low' && lowThreshold) params.set('threshold', lowThreshold)
     if (joined !== 'any') params.set('joined', joined)
+    if (follows !== 'any') params.set('follows', follows)
     if (sort !== 'score_desc') params.set('sort', sort)
     const next = params.toString()
     const target = `#members${next ? `?${next}` : ''}`
     if (window.location.hash !== target) window.history.replaceState(null, '', target)
-  }, [search, filter, segment, protection, points, lowThreshold, joined, sort])
+  }, [search, filter, segment, protection, points, lowThreshold, joined, follows, sort])
   const { data, mutate, isLoading } = useSWR<Paginated<LinkedUser>>(`/api/users?${query}`, api)
   // A link of the form #members?search=<id>&open=<id> opens that member's drawer directly, so
   // another page can hand over to the evidence instead of describing where to find it.
@@ -156,8 +169,8 @@ export default function MembersPage({ session }: { session: Session }) {
     setPendingOpen('')
   }, [pendingOpen, data])
   const resetPage = <T,>(setter: (value: T) => void) => (value: T) => { setter(value); setPage(1) }
-  const hasFilters = Boolean(search) || filter !== 'active' || segment !== 'everyone' || protection !== 'any' || points !== 'any' || joined !== 'any'
-  const clearFilters = () => { setSearch(''); setFilter('active'); setSegment('everyone'); setProtection('any'); setPoints('any'); setLowThreshold(''); setJoined('any'); setSort('score_desc'); setPage(1) }
+  const hasFilters = Boolean(search) || filter !== 'active' || segment !== 'everyone' || protection !== 'any' || points !== 'any' || joined !== 'any' || follows !== 'any'
+  const clearFilters = () => { setSearch(''); setFilter('active'); setSegment('everyone'); setProtection('any'); setPoints('any'); setLowThreshold(''); setJoined('any'); setFollows('any'); setSort('score_desc'); setPage(1) }
 
   const patch = async (user: LinkedUser, body: Record<string, unknown>, success: string) => {
     try {
@@ -269,6 +282,7 @@ export default function MembersPage({ session }: { session: Session }) {
     points: inheritFilters ? points : 'any',
     threshold: inheritFilters && points === 'low' && lowThreshold !== '' ? Number(lowThreshold) : null,
     joined: inheritFilters ? joined : 'any',
+    follows: inheritFilters ? follows : 'any',
     min_score: roleMin === '' ? null : Number(roleMin),
     max_score: roleMax === '' ? null : Number(roleMax),
   })
@@ -281,6 +295,7 @@ export default function MembersPage({ session }: { session: Session }) {
     protection === 'protected' ? 'holding a protected role' : protection === 'regular' ? 'without a protected role' : null,
     points === 'positive' ? 'who have points' : points === 'zero' ? 'on 0 points' : points === 'low' ? `at or below ${lowThreshold || 'the threshold'} points` : null,
     joined === 'new' ? 'who joined recently' : joined === 'established' ? 'who joined a while ago' : null,
+    follows === 'both' ? 'who follow both accounts' : follows === 'missing' ? 'who do not follow both accounts' : follows === 'unchecked' ? 'whose follows have never been checked' : null,
   ].filter(Boolean) as string[]
   const rangeClause = roleMin !== '' && roleMax !== '' ? `between ${roleMin} and ${roleMax} points`
     : roleMin !== '' ? `on ${roleMin} points or more`
@@ -404,6 +419,24 @@ export default function MembersPage({ session }: { session: Session }) {
     finally { setDeleting(false) }
   }
 
+  const openFollowCheck = async () => {
+    setFollowBusy(true)
+    try { setFollowPlan(await api<FollowEstimate>('/api/users/follow-estimate')) }
+    catch (error) { setNotice({ text: error instanceof Error ? error.message : 'Could not read the follower counts', kind: 'error' }) }
+    finally { setFollowBusy(false) }
+  }
+
+  const runFollowCheck = async () => {
+    setFollowBusy(true)
+    try {
+      const result = await mutateApi<FollowCheckResult>('/api/users/check-follows', session.csrf_token, 'POST')
+      setFollowPlan(undefined)
+      setFollowResult(result)
+      await mutate()
+    } catch (error) { setNotice({ text: error instanceof Error ? error.message : 'Follow check failed', kind: 'error' }) }
+    finally { setFollowBusy(false) }
+  }
+
   const saveEdit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!selected) return
@@ -432,11 +465,11 @@ export default function MembersPage({ session }: { session: Session }) {
     finally { setSaving(false) }
   }
 
-  const anyModal = Boolean(confirmDelete || confirmDeactivate || showLink || showImport || showRoles || selected || syncResult || verifyResult || verifyPlan)
-  const anyBusy = importing || saving || roleBusy || verifying || memberScanning || syncing || adjusting
+  const anyModal = Boolean(followPlan || followResult || confirmDelete || confirmDeactivate || showLink || showImport || showRoles || selected || syncResult || verifyResult || verifyPlan)
+  const anyBusy = importing || saving || roleBusy || verifying || memberScanning || syncing || adjusting || followBusy
   useEscape(anyModal && !anyBusy && !confirmDiscard, () => {
     if (selected && editDirty()) { setConfirmDiscard('drawer'); return }
-    setShowLink(false); setShowImport(false); setShowRoles(false); setSelected(undefined); setTool('none'); setSyncResult(undefined); setVerifyResult(undefined); setVerifyPlan(undefined)
+    setShowLink(false); setShowImport(false); setShowRoles(false); setSelected(undefined); setTool('none'); setSyncResult(undefined); setVerifyResult(undefined); setVerifyPlan(undefined); setFollowPlan(undefined); setFollowResult(undefined)
   })
   useEscape(Boolean(confirmDiscard), () => setConfirmDiscard(undefined))
 
@@ -444,6 +477,7 @@ export default function MembersPage({ session }: { session: Session }) {
     <PageHeader title="Linked members" copy="Everyone in the community, with or without an X account. Protected members never appear in the low-activity report." actions={<button className="button primary" onClick={() => setShowLink(true)}><Plus size={17} /> Link member</button>} toolbar={<>
       <button className="button" onClick={openVerify} disabled={verifying} title="Check linked X accounts for suspensions, deletions, and renames (about 10 credits each)"><BadgeCheck size={17} className={verifying ? 'spin' : ''} /> {verifying ? 'Checking X…' : 'Verify X accounts'}</button>
       <button className="button" onClick={runSync} disabled={syncing} title="Register every human member of the Discord server who is missing here"><RefreshCw size={17} className={syncing ? 'spin' : ''} /> {syncing ? 'Syncing…' : 'Sync from Discord'}</button>
+      <button className="button" onClick={openFollowCheck} disabled={followBusy} title="Check which members follow the primary and secondary accounts"><UserRoundSearch size={17} className={followBusy ? 'spin' : ''} /> {followBusy ? 'Checking…' : 'Check follows'}</button>
       <button className="button" onClick={openRoles}><Tags size={17} /> Give role</button>
       <button className="button" onClick={() => setShowImport(true)}><FileUp size={17} /> Import CSV</button>
       <a className="button" href={`/api/users/export?${filterQuery}`} title="Download the list exactly as filtered below"><Download size={17} /> Export CSV</a>
@@ -461,6 +495,7 @@ export default function MembersPage({ session }: { session: Session }) {
         <div className="segmented">{POINTS.map((item) => <button className={points === item.id ? 'active' : ''} aria-pressed={points === item.id} onClick={() => resetPage(setPoints)(item.id)} key={item.id} title={item.id === 'low' ? 'Everyone at or below the threshold, protected members and newcomers included. The Low-activity report leaves those out.' : undefined}>{item.label}</button>)}</div>
         {points === 'low' && <label className="threshold-box">≤<input type="number" min={0} step={1} inputMode="numeric" placeholder="pts" value={lowThreshold} onChange={(e) => { const v = e.target.value.replace(/[^0-9]/g, ''); setLowThreshold(v); setPage(1) }} title="Points at or below this count as low activity for this view. Empty = the threshold from Scoring rules." /><span className="muted small">pts{lowThreshold === '' ? ' (from Scoring rules)' : ''}</span></label>}
         {points === 'low' && <span className="filter-note">Includes protected members and recent joiners. <a href="#low-activity">Low-activity report</a> leaves them out.</span>}
+        <div className="segmented">{FOLLOWS.map((item) => <button className={follows === item.id ? 'active' : ''} aria-pressed={follows === item.id} onClick={() => resetPage(setFollows)(item.id)} key={item.id} title={item.id === 'missing' ? 'Proven not to follow at least one account by the last check. Members who were never checked are not in here.' : undefined}>{item.label}</button>)}</div>
         <div className="segmented">{JOINED.map((item) => <button className={joined === item.id ? 'active' : ''} aria-pressed={joined === item.id} onClick={() => resetPage(setJoined)(item.id)} key={item.id} title={item.id === 'new' ? 'Joined Discord within the grace period (newcomer_grace_days in Scoring rules); never in the low-activity report' : item.id === 'established' ? 'Joined before the grace period, or join date unknown' : undefined}>{item.label}</button>)}</div>
         <div className="segmented">{['active', 'inactive', 'all'].map((value) => <button className={filter === value ? 'active' : ''} aria-pressed={filter === value} onClick={() => resetPage(setFilter)(value)} key={value}>{value === 'active' ? 'Active' : value === 'inactive' ? 'Inactive' : 'All'}</button>)}</div>
         <span className="filter-count">{data ? `${formatCount(data.total)} member${data.total === 1 ? '' : 's'}` : ''}{hasFilters && <button className="link-button" onClick={clearFilters}>Clear filters</button>}</span>
@@ -514,7 +549,8 @@ export default function MembersPage({ session }: { session: Session }) {
       <div className="member-facts">
         <span>{selected.twitter_user_id ? <a href={`https://x.com/${selected.twitter_handle}`} target="_blank">@{selected.twitter_handle}</a> : <em className="muted">no X linked</em>}</span>
         <span className="score">{formatScore(selected.score)} pts this cycle</span>
-        {selected.special_role && <span className="status complete"><i />Protected{selected.special_role_names ? ` · ${selected.special_role_names}` : ''}</span>}
+        {selected.special_role && <span className="status complete" title={selected.role_protected_names ? `Granted by the Discord role ${selected.role_protected_names}. Removing that role in Discord drops the protection at the next sync.` : 'Set here by an admin. Sync from Discord never changes it.'}><i />Protected{selected.role_protected_names ? ` · ${selected.role_protected_names}` : selected.special_role_names ? ` · ${selected.special_role_names}` : ''}{selected.role_protected_names && selected.special_role_manual ? ' + by hand' : selected.role_protected_names ? ' (Discord role)' : ' (by hand)'}</span>}
+        {selected.follows_checked_at ? <span className={`status ${selected.follows_primary === 'yes' && selected.follows_secondary === 'yes' ? 'complete' : 'failed'}`} title={`Last checked ${formatDate(selected.follows_checked_at)}`}><i />{selected.follows_primary === 'yes' && selected.follows_secondary === 'yes' ? 'Follows both accounts' : `Follows ${[selected.follows_primary === 'yes' ? 'the primary' : null, selected.follows_secondary === 'yes' ? 'the secondary' : null].filter(Boolean).join(' and ') || 'neither account'}`}</span> : <span className="muted">follows not checked</span>}
         {(selected.x_status === 'suspended' || selected.x_status === 'unavailable') && <span className="status failed"><i />X {selected.x_status}</span>}
         <span className={`status ${selected.active ? 'complete' : 'failed'}`}><i />{selected.active ? 'Active' : 'Inactive'}</span>
         {selected.discord_joined_at && <span className="muted">joined Discord {formatDate(selected.discord_joined_at)} ({daysAgo(selected.discord_joined_at)} days ago)</span>}
@@ -556,6 +592,25 @@ export default function MembersPage({ session }: { session: Session }) {
       {history?.items.length ? <div className="table-wrap standings-table"><table><thead><tr><th>Type</th><th>Target</th><th>Content / decision</th><th>Points</th><th>When</th><th /></tr></thead><tbody>
         {history.items.map((item) => <tr key={item.action_key} className={item.active ? '' : 'muted-row'}><td><span className={`action-chip ${item.action_type}`}>{item.action_type}</span></td><td>@{item.target_handle}</td><td className="decision"><strong>{item.text || 'Native retweet'}</strong><small>{item.reason}{!item.active ? ' · no longer public' : ''}</small></td><td className={`score ${item.points > 0 ? 'gain' : ''}`}>{formatScore(item.points)}</td><td>{formatDate(item.occurred_at)}</td><td>{item.action_url && <a className="icon-button" href={item.action_url} target="_blank" title="Open on X"><ExternalLink size={15} /></a>}</td></tr>)}
       </tbody></table></div> : history ? <p className="muted small">No matched actions in this cycle. If they did interact, check the X handle above is the account they used, then run a scan that covers the date.</p> : null}
+    </div></div>}
+
+    {followPlan && <div className="modal-backdrop" onMouseDown={() => { if (!followBusy) setFollowPlan(undefined) }}><div className="modal" onMouseDown={(e) => e.stopPropagation()}>
+      <div className="modal-icon"><UserRoundSearch /></div><h2>Check who follows the tracked accounts</h2>
+      <p>This reads the follower list of each tracked account once and matches your {followPlan.linked_members} linked members against it. That is far cheaper than asking about each member, and it is the only way to be sure.</p>
+      <dl className="estimate-grid" data-dialog-focus tabIndex={-1} aria-live="polite">
+        {followPlan.accounts.map((account) => <div key={account.slot}><dt>@{account.handle}</dt><dd>{account.error ? '—' : formatCount(account.followers ?? 0)}<small>{account.error ? account.error : 'followers to read'}</small></dd></div>)}
+        <div className="wide cost-cell"><dt>This check will cost about</dt><dd>{formatUsd(followPlan.credits)}<small>{formatCount(followPlan.credits)} credits · one per follower read</small></dd></div>
+      </dl>
+      <p className="field-hint">A member is only recorded as not following when the whole follower list was read. If a list is too long to finish, they stay marked unchecked rather than being blamed for it.</p>
+      <div className="modal-actions"><button className="button ghost" onClick={() => setFollowPlan(undefined)} disabled={followBusy}>Cancel</button><button className="button primary" onClick={runFollowCheck} disabled={followBusy}>{followBusy ? 'Checking…' : 'Run the check'}</button></div>
+    </div></div>}
+
+    {followResult && <div className="modal-backdrop" onMouseDown={() => setFollowResult(undefined)}><div className="modal" onMouseDown={(e) => e.stopPropagation()}>
+      <div className="modal-icon"><UserRoundSearch /></div><h2>Follow check finished</h2>
+      <p className="import-summary">Checked <strong>{followResult.checked}</strong> linked members · <strong>{followResult.follows_both}</strong> follow both accounts · {followResult.follows_primary} follow @{followResult.primary.handle} · {followResult.follows_secondary} follow @{followResult.secondary.handle} · cost {formatUsd(followResult.credits)}.</p>
+      {followResult.unknown > 0 && <p className="estimate-warning">{followResult.unknown} member{followResult.unknown === 1 ? ' was' : 's were'} left unchecked because a follower list could not be read to the end. They are not counted as non-followers.</p>}
+      <p className="muted small">Use the <strong>Not following</strong> filter to see everyone proven to be missing at least one follow.</p>
+      <div className="modal-actions"><button className="button ghost" onClick={() => setFollowResult(undefined)}>Close</button><button className="button primary" onClick={() => { setFollowResult(undefined); resetPage(setFollows)('missing') }}>Show who is not following</button></div>
     </div></div>}
 
     {confirmDelete && <div className="modal-backdrop stacked" onMouseDown={() => { if (!deleting) setConfirmDelete(undefined) }}><div className="modal" onMouseDown={(e) => e.stopPropagation()}>

@@ -423,3 +423,7 @@ th.sortable { padding: 0; }
 .modal label.depth-custom, .scan-card label.depth-custom { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--muted); }
 /* The evidence drawer is the screen that gets defended to a person; dates should not wrap. */
 .member-drawer .standings-table td:last-child, .member-drawer .standings-table td:nth-last-child(2) { white-space: nowrap; }
+
+/* An exact lookback window, for a cycle that did not start on a round number of days ago. */
+.custom-days input { max-width: 140px; }
+.window-clamp { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line-soft); }

@@ -8,6 +8,7 @@ import type { LinkedUser, LowActivityReport, Overview, ScanEstimate, Session } f
 const WINDOWS = [['cycle', 'Whole cycle'], ['30d', 'Last 30 days'], ['60d', 'Last 60 days'], ['90d', 'Last 90 days'], ['180d', 'Last 6 months'], ['365d', 'Last 12 months']] as const
 
 const PERIOD_LABEL: Record<string, string> = { '24h': 'last 24 hours', '7d': 'last 7 days', '30d': 'last 30 days', '60d': 'last 60 days', '90d': 'last 90 days', '180d': 'last 6 months', '365d': 'last 12 months' }
+const periodLabel = (value: string) => PERIOD_LABEL[value] ?? (/^\d{1,3}d$/.test(value) ? `last ${Number(value.slice(0, -1))} days` : value)
 
 export default function OverviewPage({ session }: { session: Session }) {
   const { data, mutate, isLoading } = useSWR<Overview>('/api/overview', api, { refreshInterval: 10000 })
@@ -22,6 +23,10 @@ export default function OverviewPage({ session }: { session: Session }) {
   const barWidth = (score: number) =>
     boardTop <= boardFloor ? 100 : 16 + ((score - boardFloor) / (boardTop - boardFloor)) * 84
   const [period, setPeriod] = useState('24h')
+  // The backend takes any window from 1 to 366 days, so the presets are a shortcut rather
+  // than the whole choice. A cycle that started mid-month needs a number nobody preset.
+  const [customDays, setCustomDays] = useState('')
+  const periodValid = Boolean(PERIOD_LABEL[period]) || (/^\d{1,3}d$/.test(period) && Number(period.slice(0, -1)) >= 1 && Number(period.slice(0, -1)) <= 366)
   const [notice, setNotice] = useState<{ text: string; kind: 'success' | 'error' | 'loading' }>()
   const [estimate, setEstimate] = useState<ScanEstimate>()
   const [verifyX, setVerifyX] = useState(true)
@@ -186,15 +191,17 @@ export default function OverviewPage({ session }: { session: Session }) {
         <aside className="scan-card">
           <h2>Run a scan</h2>
           <p>Collect recent replies, quotes, retweets, and organic mentions from tracked accounts.</p>
-          <label>Lookback window<select value={period} onChange={(event) => setPeriod(event.target.value)}><option value="24h">Last 24 hours</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option><option value="60d">Last 60 days</option><option value="90d">Last 90 days</option><option value="180d">Last 6 months</option><option value="365d">Last 12 months</option></select></label>
-          <button className="button primary" onClick={openScan} disabled={running || loadingEstimate}><Play size={17} />{running ? 'Scan running' : loadingEstimate ? 'Estimating cost…' : 'Run engagement scan'}</button>
+          <label>Lookback window<select value={PERIOD_LABEL[period] ? period : 'custom'} onChange={(event) => { const next = event.target.value; if (next === 'custom') { const days = customDays || String(cycleDays && cycleDays > 0 ? cycleDays : 30); setCustomDays(days); setPeriod(`${days}d`) } else { setPeriod(next) } }}><option value="24h">Last 24 hours</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option><option value="60d">Last 60 days</option><option value="90d">Last 90 days</option><option value="180d">Last 6 months</option><option value="365d">Last 12 months</option><option value="custom">An exact number of days…</option></select></label>
+          {!PERIOD_LABEL[period] && <label className="custom-days">Days to look back<input type="number" min={1} max={366} step={1} inputMode="numeric" value={customDays} onChange={(event) => { const days = event.target.value.replace(/[^0-9]/g, '').slice(0, 3); setCustomDays(days); setPeriod(days ? `${days}d` : '') }} /><small className="field-hint">1 to 366. {cycleDays !== null && cycleDays > 0 ? `This cycle started ${cycleDays} day${cycleDays === 1 ? '' : 's'} ago, so ${cycleDays} covers all of it.` : 'Covers the whole cycle when it is at least as long as the cycle.'}</small></label>}
+          <p className="field-hint window-clamp">A scan never reaches back past the start of the current cycle, so a window longer than the cycle simply covers the whole cycle. Points from before the last reset cannot be counted twice.</p>
+          <button className="button primary" onClick={openScan} disabled={running || loadingEstimate || !periodValid} title={periodValid ? undefined : 'Enter a number of days between 1 and 366'}><Play size={17} />{running ? 'Scan running' : loadingEstimate ? 'Estimating cost…' : 'Run engagement scan'}</button>
           {running
             ? <div className="scan-progress"><p><LoaderCircle className="spin" size={15} /> Scanning the {data?.last_scan?.period} window · {elapsedLabel} so far</p><small>A long window can take 15 minutes. You can leave this page; the report appears under Scan reports when it finishes.</small></div>
             : <small><Clock3 size={13} /> {data?.last_scan?.status === 'failed' ? 'Last scan failed' : 'Last completed'} {formatDate(data?.last_scan?.completed_at)}{data?.last_scan?.status === 'complete' && <> · <Check size={12} /> {String(data.last_scan.summary?.discovered ?? 0)} actions matched</>}</small>}
         </aside>
       </section>
       {estimate && <div className="modal-backdrop" onMouseDown={() => { if (!starting) setEstimate(undefined) }}><div className="modal" onMouseDown={(e) => e.stopPropagation()}>
-        <div className="modal-icon"><Play /></div><h2>Scan the {PERIOD_LABEL[period] ?? estimate.period}</h2>
+        <div className="modal-icon"><Play /></div><h2>Scan the {periodLabel(period || estimate.period)}</h2>
         <p>The bot collects replies, quotes, retweets, and mentions on the tracked accounts' posts, then scores every linked member who shows up. Cost depends on how many posts and replies there are, not on the member count.</p>
         <dl className="estimate-grid" data-dialog-focus tabIndex={-1} aria-live="polite">
           <div><dt>Members who will be scored</dt><dd>{estimate.linked_members - (skipProtected ? estimate.protected_linked : 0)}<small>{skipProtected ? `${estimate.protected_linked} protected skipped` : `${estimate.protected_linked} of them protected`} · {estimate.unlinked_members} without X</small></dd></div>

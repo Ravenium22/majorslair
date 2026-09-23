@@ -160,6 +160,13 @@ class DatabaseRepository:
             handle_history="|".join(row.handle_history or []),
             special_role=bool(row.special_role),
             special_role_names=row.special_role_names or "",
+            special_role_manual=bool(getattr(row, "special_role_manual", False)),
+            role_protected_names=getattr(row, "role_protected_names", "") or "",
+            follows_primary=getattr(row, "follows_primary", "") or "",
+            follows_secondary=getattr(row, "follows_secondary", "") or "",
+            follows_checked_at=(
+                isoformat(row.follows_checked_at) if getattr(row, "follows_checked_at", None) else ""
+            ),
             x_status=row.x_status or "",
             x_checked_at=isoformat(row.x_checked_at) if row.x_checked_at else "",
             discord_joined_at=isoformat(row.discord_joined_at) if row.discord_joined_at else "",
@@ -204,6 +211,7 @@ class DatabaseRepository:
                     score=0,
                     handle_history=[],
                     special_role=bool(special_role),
+                    special_role_manual=bool(special_role),
                     special_role_names=(special_role_names or "").strip()[:255],
                     discord_joined_at=discord_joined_at,
                 )
@@ -213,6 +221,7 @@ class DatabaseRepository:
                     row.discord_username = discord_username
                 if special_role is not None:
                     row.special_role = special_role
+                    row.special_role_manual = special_role
                 if special_role_names is not None:
                     row.special_role_names = special_role_names.strip()[:255]
                 if discord_joined_at is not None:
@@ -260,12 +269,88 @@ class DatabaseRepository:
             if row is None:
                 return None
             row.special_role = special_role
+            row.special_role_manual = special_role
             if special_role_names is not None:
                 row.special_role_names = special_role_names.strip()[:255]
             elif not special_role:
                 row.special_role_names = ""
+            if not special_role:
+                # Otherwise the role side would put the protection straight back.
+                row.role_protected_names = ""
             row.updated_at = utc_now()
             return self._linked_user(row)
+
+    async def apply_role_protection(
+        self, held: dict[str, str]
+    ) -> dict[str, list[dict[str, str]]]:
+        """Mirror Discord: `held` maps every member id to the protected roles they hold now.
+
+        Sync owns this side of protection outright, so a member who lost the role loses the
+        protection with it. Protection an admin set by hand is left alone, which is why the
+        two are stored separately. Returns who gained and who lost it.
+        """
+        gained: list[dict[str, str]] = []
+        lost: list[dict[str, str]] = []
+        if not held:
+            return {"gained": gained, "lost": lost}
+        now = utc_now()
+        async with self.sessions.begin() as session:
+            rows = (
+                await session.scalars(
+                    select(UserRow).where(UserRow.discord_user_id.in_(set(held)))
+                )
+            ).all()
+            for row in rows:
+                names = held.get(row.discord_user_id, "")
+                before_roles = row.role_protected_names or ""
+                if names == before_roles:
+                    continue
+                row.role_protected_names = names[:255]
+                effective = bool(row.special_role_manual) or bool(names)
+                if row.special_role != effective:
+                    row.special_role = effective
+                row.updated_at = now
+                entry = {
+                    "discord_user_id": row.discord_user_id,
+                    "discord_username": row.discord_username,
+                    "roles": names or before_roles,
+                }
+                if names and not before_roles:
+                    gained.append(entry)
+                elif before_roles and not names:
+                    # Still protected when they were also protected by hand; the dashboard
+                    # says which, so this only reports the role coming off.
+                    lost.append({**entry, "still_protected": "yes" if effective else "no"})
+        return {"gained": gained, "lost": lost}
+
+    async def record_follow_check(
+        self, results: dict[str, tuple[str, str]]
+    ) -> int:
+        """Store per-member follow status as (primary, secondary), each "yes", "no" or "".
+
+        An empty string means the check could not answer for that account, so the stored
+        value is left as it was rather than being written down as a "no".
+        """
+        if not results:
+            return 0
+        now = utc_now()
+        written = 0
+        async with self.sessions.begin() as session:
+            rows = (
+                await session.scalars(
+                    select(UserRow).where(UserRow.discord_user_id.in_(set(results)))
+                )
+            ).all()
+            for row in rows:
+                primary, secondary = results[row.discord_user_id]
+                if primary:
+                    row.follows_primary = primary
+                if secondary:
+                    row.follows_secondary = secondary
+                if primary or secondary:
+                    row.follows_checked_at = now
+                    written += 1
+        return written
 
     async def link_user(
         self,
@@ -1045,6 +1130,7 @@ class DatabaseRepository:
         grace_days: int = 30,
         min_score: float | None = None,
         max_score: float | None = None,
+        follows: str = "any",
         page: int = 1,
         page_size: int = 50,
     ) -> dict[str, Any]:
@@ -1052,8 +1138,22 @@ class DatabaseRepository:
 
         ``points`` is one of any / positive / zero / low (at or below ``low_threshold``).
         ``sort`` is one of score_desc, score_asc, name, last_signal, linked_at.
+        ``follows`` is one of any / both / missing / unchecked, from the last follow check.
         """
         filters = []
+        if follows == "both":
+            filters.append(
+                and_(UserRow.follows_primary == "yes", UserRow.follows_secondary == "yes")
+            )
+        elif follows == "missing":
+            # Proven not to follow at least one of them. "Never checked" is not "missing".
+            filters.append(
+                or_(UserRow.follows_primary == "no", UserRow.follows_secondary == "no")
+            )
+        elif follows == "unchecked":
+            filters.append(
+                or_(UserRow.follows_primary == "", UserRow.follows_secondary == "")
+            )
         if search:
             pattern = f"%{search.strip()}%"
             filters.append(

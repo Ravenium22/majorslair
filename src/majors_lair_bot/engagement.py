@@ -580,6 +580,92 @@ class EngagementService:
             )
             return outcome
 
+    async def check_follows(
+        self, *, actor_discord_id: str, max_pages: int = 400, include_protected: bool = True
+    ) -> dict[str, Any]:
+        """Check which linked members follow the primary and secondary accounts.
+
+        Reads the follower list of each tracked account once and matches members against it,
+        rather than asking about each member, which is both far cheaper and one pass.
+
+        A follower list that hit the page cap is incomplete, and an incomplete list can only
+        confirm a follow, never rule one out, so nothing is recorded as "no" in that case.
+        """
+        async with self._scan_lock:
+            config = await self.repository.get_config()
+            rules = ScoringRules.from_mapping(config)
+            members = [
+                user
+                for user in await self.repository.list_users(active_only=True)
+                if user.twitter_user_id and (include_protected or not user.special_role)
+            ]
+            self.twitter.reset_usage()
+            accounts: dict[str, dict[str, Any]] = {}
+            for slot, handle in (("primary", rules.primary_handle), ("secondary", rules.secondary_handle)):
+                if not handle:
+                    continue
+                try:
+                    ids, handles, complete = await self.twitter.get_followers(
+                        handle, max_pages=max_pages
+                    )
+                except TwitterApiError as exc:
+                    LOGGER.warning("follower list failed for @%s: %s", handle, exc)
+                    accounts[slot] = {"handle": handle, "error": str(exc), "complete": False}
+                    continue
+                accounts[slot] = {
+                    "handle": handle,
+                    "followers": len(ids),
+                    "complete": complete,
+                    "ids": ids,
+                    "handles": handles,
+                }
+
+            def verdict(slot: str, user: LinkedUser) -> str:
+                account = accounts.get(slot)
+                if not account or account.get("error"):
+                    return ""
+                follows = user.twitter_user_id in account["ids"] or (
+                    user.twitter_handle.lower() in account["handles"]
+                )
+                if follows:
+                    return "yes"
+                # Only a complete list can prove somebody is missing from it.
+                return "no" if account["complete"] else ""
+
+            results = {
+                user.discord_user_id: (verdict("primary", user), verdict("secondary", user))
+                for user in members
+            }
+            await self.repository.record_follow_check(results)
+
+            def tally(index: int, value: str) -> int:
+                return sum(1 for pair in results.values() if pair[index] == value)
+
+            summary = {
+                "checked": len(members),
+                "primary": {
+                    k: v for k, v in accounts.get("primary", {}).items() if k not in {"ids", "handles"}
+                },
+                "secondary": {
+                    k: v for k, v in accounts.get("secondary", {}).items() if k not in {"ids", "handles"}
+                },
+                "follows_primary": tally(0, "yes"),
+                "follows_secondary": tally(1, "yes"),
+                "follows_both": sum(1 for pair in results.values() if pair == ("yes", "yes")),
+                "missing_primary": tally(0, "no"),
+                "missing_secondary": tally(1, "no"),
+                "unknown": sum(1 for pair in results.values() if "" in pair),
+                "api_requests": self.twitter.request_count,
+                "items_returned": self.twitter.items_returned,
+                "credits": self.twitter.items_returned,
+            }
+            await self.repository.append_audit(
+                event_type="follow_check",
+                actor_discord_id=actor_discord_id,
+                details=summary,
+            )
+            return summary
+
     async def verify_linked_accounts(
         self,
         *,

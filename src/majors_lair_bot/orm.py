@@ -33,6 +33,26 @@ class UserRow(Base):
     special_role_names: Mapped[str] = mapped_column(
         String(255), nullable=False, default="", server_default=""
     )
+    # Protection has two independent sources, kept apart so Sync from Discord can mirror the
+    # server without wiping a decision an admin made by hand.
+    #   special_role_manual   - set from the dashboard or a CSV import; sync never touches it
+    #   role_protected_names  - the configured Discord roles the member holds right now;
+    #                           sync owns this outright, so losing the role removes it
+    # `special_role` stays the effective flag every query and report already reads.
+    special_role_manual: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
+    role_protected_names: Mapped[str] = mapped_column(
+        String(255), nullable=False, default="", server_default=""
+    )
+    # Last follow check against the two tracked accounts: "" (never checked), "yes" or "no".
+    follows_primary: Mapped[str] = mapped_column(
+        String(8), nullable=False, default="", server_default=""
+    )
+    follows_secondary: Mapped[str] = mapped_column(
+        String(8), nullable=False, default="", server_default=""
+    )
+    follows_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Result of the last X account verification: "" (never checked), "ok", "suspended",
     # or "unavailable" (deleted, deactivated, or otherwise gone).
     x_status: Mapped[str] = mapped_column(String(32), nullable=False, default="", server_default="")

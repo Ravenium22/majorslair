@@ -606,3 +606,55 @@ async def test_deactivate_members_only_touches_the_active_ones(
     gone = await repository.get_user("910")
     assert gone is not None and gone.active is False
     assert await repository.deactivate_members(set()) == []
+
+
+@pytest.mark.asyncio
+async def test_role_protection_follows_discord_but_leaves_manual_alone(
+    repository: DatabaseRepository,
+) -> None:
+    """Sync owns role-granted protection in both directions; a hand-set flag survives it."""
+    await repository.link_user(
+        discord_user_id="920", discord_username="byrole", twitter_handle="r_x", twitter_user_id="r1"
+    )
+    await repository.link_user(
+        discord_user_id="921", discord_username="byhand", twitter_handle="h_x", twitter_user_id="h1"
+    )
+    await repository.link_user(
+        discord_user_id="922", discord_username="both", twitter_handle="b_x", twitter_user_id="b1"
+    )
+    await repository.set_special_role("921", special_role=True, special_role_names="Friend")
+    await repository.set_special_role("922", special_role=True, special_role_names="Friend")
+
+    gained = await repository.apply_role_protection(
+        {"920": "Nucleus", "921": "", "922": "Nucleus"}
+    )
+    assert {row["discord_username"] for row in gained["gained"]} == {"byrole", "both"}
+    assert (await repository.get_user("920")).special_role is True
+    assert (await repository.get_user("921")).special_role is True
+
+    # The role comes off all three in Discord.
+    lost = await repository.apply_role_protection({"920": "", "921": "", "922": ""})
+    assert {row["discord_username"] for row in lost["lost"]} == {"byrole", "both"}
+    byrole = await repository.get_user("920")
+    byhand = await repository.get_user("921")
+    both = await repository.get_user("922")
+    assert byrole.special_role is False, "role removed in Discord, so protection goes"
+    assert byhand.special_role is True, "never had the role; the manual flag is untouched"
+    assert both.special_role is True, "still protected by hand after losing the role"
+
+    # Unprotecting by hand must not be undone by the role side next time.
+    await repository.set_special_role("922", special_role=False)
+    assert (await repository.get_user("922")).special_role is False
+
+
+@pytest.mark.asyncio
+async def test_role_protection_is_a_no_op_when_nothing_moved(
+    repository: DatabaseRepository,
+) -> None:
+    await repository.link_user(
+        discord_user_id="930", discord_username="steady", twitter_handle="s_x", twitter_user_id="s1"
+    )
+    await repository.apply_role_protection({"930": "Nucleus"})
+    again = await repository.apply_role_protection({"930": "Nucleus"})
+    assert again == {"gained": [], "lost": []}
+    assert await repository.apply_role_protection({}) == {"gained": [], "lost": []}

@@ -537,6 +537,42 @@ class TwitterApiClient:
             max_pages=max_pages,
         )
 
+    async def get_followers(
+        self, handle: str, *, max_pages: int
+    ) -> tuple[set[str], set[str], bool]:
+        """Everyone following `handle`, as (user IDs, lowercased handles, reached the end).
+
+        twitterapi.io serves 200 per page and bills per follower returned, so a big account
+        costs about a cent per thousand. The completeness flag matters: a run that stopped at
+        the page cap has only seen the most recent followers, and a member missing from a
+        partial list has not been shown to be a non-follower.
+        """
+        result = await self._paginate(
+            "/twitter/user/followers",
+            params={"userName": handle.removeprefix("@").lower(), "pageSize": 200},
+            item_key=("followers", "users", "data"),
+            max_pages=max_pages,
+        )
+        ids: set[str] = set()
+        handles: set[str] = set()
+        for item in result.items:
+            user_id = str(
+                deep_get(item, (("id",), ("id_str",), ("rest_id",), ("userId",)), default="") or ""
+            )
+            if user_id:
+                ids.add(user_id)
+            screen_name = str(
+                deep_get(
+                    item,
+                    (("userName",), ("screen_name",), ("username",), ("core", "screen_name")),
+                    default="",
+                )
+                or ""
+            )
+            if screen_name:
+                handles.add(screen_name.lower())
+        return ids, handles, result.complete
+
     async def get_users_by_ids(self, user_ids: list[str]) -> dict[str, dict[str, Any]]:
         """Profiles keyed by stable X user ID, 100 per request.
 

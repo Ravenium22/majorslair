@@ -140,6 +140,7 @@ class MemberFilters(BaseModel):
     min_score: float | None = None
     max_score: float | None = None
     threshold: float | None = None
+    follows: str = "any"
 
 
 class RoleBulkRequest(BaseModel):
@@ -454,6 +455,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         min_score: float | None = None,
         max_score: float | None = None,
         threshold: float | None = None,
+        follows: str = "any",
         page: int = 1,
         page_size: int = 50,
     ) -> dict[str, Any]:
@@ -481,6 +483,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             grace_days=grace,
             min_score=min_score,
             max_score=max_score,
+            follows=follows,
             page=page,
             page_size=page_size,
         )
@@ -551,6 +554,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             grace_days=grace,
             min_score=filters.min_score,
             max_score=filters.max_score,
+            follows=filters.follows,
             page=1,
             page_size=10000,
         )
@@ -850,6 +854,43 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             },
         )
 
+    @app.post("/api/users/check-follows")
+    async def check_follows(admin: MutatingAdmin, include_protected: bool = True) -> dict[str, Any]:
+        """Check which linked members follow the primary and secondary accounts."""
+        return await runtime.service.check_follows(
+            actor_discord_id=str(admin["discord_user_id"]),
+            include_protected=include_protected,
+        )
+
+    @app.get("/api/users/follow-estimate")
+    async def follow_estimate(_: Admin) -> dict[str, Any]:
+        """Roughly what the follow check will cost, from the two accounts' follower counts."""
+        config_values = await runtime.repository.get_config()
+        rules = ScoringRules.from_mapping(config_values)
+        accounts: list[dict[str, Any]] = []
+        total = 0
+        for slot, handle in (("primary", rules.primary_handle), ("secondary", rules.secondary_handle)):
+            if not handle:
+                continue
+            try:
+                profile = await runtime.service.twitter.get_user_info(handle)
+            except Exception as exc:  # noqa: BLE001
+                accounts.append({"slot": slot, "handle": handle, "error": str(exc)})
+                continue
+            followers = int(
+                profile.get("followers")
+                or profile.get("followers_count")
+                or profile.get("followersCount")
+                or 0
+            )
+            total += followers
+            accounts.append({"slot": slot, "handle": handle, "followers": followers})
+        linked = sum(
+            1 for user in await runtime.repository.list_users(active_only=True) if user.twitter_user_id
+        )
+        # twitterapi.io bills one credit per follower returned, 200 per page.
+        return {"accounts": accounts, "linked_members": linked, "credits": total}
+
     @app.post("/api/users/verify-x")
     async def verify_x_accounts(
         admin: MutatingAdmin, payload: VerifyRequest | None = None
@@ -1133,9 +1174,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         registry = {user.discord_user_id: user for user in await runtime.repository.list_users()}
         added: list[dict[str, str]] = []
         renamed: list[dict[str, str]] = []
-        protected_by_role: list[dict[str, str]] = []
         bots = 0
         ignored_present = 0
+        role_protection: dict[str, str] = {}
         for member in members:
             user = member.get("user") or {}
             user_id = str(user.get("id") or "")
@@ -1154,8 +1195,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 {role_names[str(r)] for r in member.get("roles", []) if str(r) in role_names}
             )
             existing = registry.get(user_id)
-            special_role = True if matched_roles else None
-            special_names = ", ".join(matched_roles) if matched_roles else None
+            role_protection[user_id] = ", ".join(matched_roles)
             joined_at = None
             if member.get("joined_at"):
                 try:
@@ -1163,16 +1203,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 except (ValueError, TypeError):
                     joined_at = None
             if existing is not None:
-                if existing.special_role and special_names and existing.special_role_names:
-                    merged = sorted(
-                        set(existing.special_role_names.split(", ")) | set(matched_roles)
-                    )
-                    special_names = ", ".join(name for name in merged if name)
                 await runtime.repository.register_member(
                     discord_user_id=user_id,
                     discord_username=handle,
-                    special_role=special_role,
-                    special_role_names=special_names,
                     discord_joined_at=joined_at,
                 )
                 if existing.discord_username != handle:
@@ -1183,20 +1216,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                             "discord_username": handle,
                         }
                     )
-                if matched_roles and not existing.special_role:
-                    protected_by_role.append(
-                        {
-                            "discord_user_id": user_id,
-                            "discord_username": handle,
-                            "roles": ", ".join(matched_roles),
-                        }
-                    )
                 continue
             await runtime.repository.register_member(
                 discord_user_id=user_id,
                 discord_username=handle,
-                special_role=special_role,
-                special_role_names=special_names,
                 discord_joined_at=joined_at,
             )
             added.append(
@@ -1206,14 +1229,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "roles": ", ".join(matched_roles),
                 }
             )
-            if matched_roles:
-                protected_by_role.append(
-                    {
-                        "discord_user_id": user_id,
-                        "discord_username": handle,
-                        "roles": ", ".join(matched_roles),
-                    }
-                )
+
+        protection = await runtime.repository.apply_role_protection(role_protection)
+        protected_by_role = protection["gained"]
+        unprotected_by_role = protection["lost"]
 
         discord_ids = {
             str((m.get("user") or {}).get("id") or "")
@@ -1261,6 +1280,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "added": len(added),
                 "renamed": len(renamed),
                 "protected_by_role": len(protected_by_role),
+                "unprotected_by_role": len(unprotected_by_role),
                 "left_server": len(left),
                 "deactivated": len(deactivated),
                 "ignored": ignored_present,
@@ -1278,6 +1298,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "added": added,
             "renamed": renamed,
             "protected_by_role": protected_by_role,
+            "unprotected_by_role": unprotected_by_role,
             "protected_roles_configured": sorted(role_names.values()),
             "unmatched_role_names": unmatched_role_names,
             "left_server": left,
