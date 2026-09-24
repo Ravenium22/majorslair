@@ -67,6 +67,8 @@ export type Overview = {
   cycle_id: string
   cycle_started_at: string
   credits_this_month: number
+  credits_this_cycle?: number
+  scans_this_cycle?: number
   scans_this_month: number
   bot_connected: boolean
   last_scan: Scan | null
@@ -93,6 +95,8 @@ export type Action = {
 
 export type TrackedPost = {
   tweet_id: string
+  text?: string
+  engagement?: { actions: number; points: number; by_type: Record<string, number> }
   url: string
   source_handle: string
   discovered_at: string
@@ -283,3 +287,12 @@ export type FollowCheckResult = {
   unknown: number
   credits: number
 }
+
+export type ScoreBreakdown = {
+  by_type: Record<string, { count: number; points: number; zero: number }>
+  adjustments: { count: number; points: number }
+  no_longer_counted: number
+  total: number
+}
+
+export type MemberDetail = { member: LinkedUser; breakdown: ScoreBreakdown }

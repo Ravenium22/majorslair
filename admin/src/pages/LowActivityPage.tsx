@@ -38,7 +38,7 @@ function download(report: LowActivityReport, ticked: (member: LinkedUser) => boo
   URL.revokeObjectURL(url)
 }
 
-/** Every row opens that member's drawer on the Members page: this is the one screen whose
+/** Every row opens that member's own page: this is the one screen whose
  *  output gets defended to a real person, so the proof has to be one click away. */
 function MemberTable({ rows, isTicked, onToggle, onToggleAll }: {
   rows: LinkedUser[]
@@ -56,7 +56,7 @@ function MemberTable({ rows, isTicked, onToggle, onToggleAll }: {
       const follow = followState(m)
       return <tr key={m.discord_user_id} className={isTicked(m) ? 'picked' : ''}>
         <td className="pick-cell"><label className="pick-box"><input type="checkbox" checked={isTicked(m)} onChange={() => onToggle(m)} aria-label={`Tick ${m.discord_username} for the purge`} /></label></td>
-        <td><a className="member-cell linked-cell" href={`#members?search=${m.discord_user_id}&open=${m.discord_user_id}`} title="Open their points, history and scan tools"><strong>{m.discord_username}</strong><small className="mono">{m.discord_user_id}</small></a></td>
+        <td><a className="member-cell linked-cell" href={`#member?id=${m.discord_user_id}`} title="Open their points, history and scan tools"><strong>{m.discord_username}</strong><small className="mono">{m.discord_user_id}</small></a></td>
         <td>{m.twitter_user_id
           ? <span className="protected-cell"><a href={`https://x.com/${m.twitter_handle}`} target="_blank" rel="noreferrer">@{m.twitter_handle}</a>{(m.x_status === 'suspended' || m.x_status === 'unavailable') && <span className="status failed"><i />X {m.x_status}</span>}</span>
           : <span className="muted">No X account linked</span>}</td>
@@ -64,7 +64,7 @@ function MemberTable({ rows, isTicked, onToggle, onToggleAll }: {
         <td>{m.twitter_user_id ? <span className={`status ${follow.tone}`} title={follow.detail}>{follow.tone && <i />}{follow.label}</span> : <span className="muted">—</span>}</td>
         <td>{formatDate(m.last_active_at)}</td>
         <td>{m.discord_joined_at ? <span className="protected-cell">{formatDate(m.discord_joined_at)}<small>{daysAgo(m.discord_joined_at)} days</small></span> : <span className="muted" title="Run Sync from Discord to fill join dates">unknown</span>}</td>
-        <td className="row-actions"><a className="icon-button" href={`#members?search=${m.discord_user_id}&open=${m.discord_user_id}`} title="See why they scored this"><FileSearch size={15} /></a>{m.twitter_user_id && <a className="icon-button" href={`https://x.com/${m.twitter_handle}`} target="_blank" rel="noreferrer" title="Open their X profile"><ExternalLink size={15} /></a>}</td>
+        <td className="row-actions"><a className="icon-button" href={`#member?id=${m.discord_user_id}`} title="See why they scored this"><FileSearch size={15} /></a>{m.twitter_user_id && <a className="icon-button" href={`https://x.com/${m.twitter_handle}`} target="_blank" rel="noreferrer" title="Open their X profile"><ExternalLink size={15} /></a>}</td>
       </tr>
     })}</tbody>
   </table></div>

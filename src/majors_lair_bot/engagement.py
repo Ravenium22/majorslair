@@ -791,6 +791,7 @@ class EngagementService:
                     "active": "TRUE",
                     "last_checked_at": "",
                     "post_created_at": isoformat(tweet.created_at),
+                    "text": tweet.text,
                 }
             ]
         )
@@ -900,6 +901,7 @@ class EngagementService:
                 "active": "TRUE",
                 "last_checked_at": now_iso,
                 "post_created_at": isoformat(tweet.created_at),
+                "text": tweet.text,
             }
             for tweet in indexed.values()
         ]
@@ -1557,6 +1559,7 @@ class EngagementService:
                         "active": "TRUE",
                         "last_checked_at": isoformat(),
                         "post_created_at": isoformat(post.created_at),
+                        "text": post.text,
                     }
                     for post in source_posts
                 ]

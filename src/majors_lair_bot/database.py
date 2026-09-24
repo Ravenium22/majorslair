@@ -8,7 +8,7 @@ from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import and_, delete, func, or_, select
+from sqlalchemy import and_, case, delete, func, or_, select
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -587,6 +587,7 @@ class DatabaseRepository:
                     "origin": str(post.get("origin", "auto")),
                     "active": parse_bool(post.get("active"), default=True),
                 }
+                post_text = str(post.get("text") or "")
                 discovered_at = parse_datetime(post.get("discovered_at"))
                 post_created_at = parse_datetime(
                     post.get("post_created_at") or post.get("discovered_at")
@@ -602,6 +603,7 @@ class DatabaseRepository:
                         discovered_at=discovered_at,
                         post_created_at=post_created_at,
                         last_checked_at=last_checked_at,
+                        text=post_text,
                         **data,
                     )
                     session.add(row)
@@ -613,6 +615,8 @@ class DatabaseRepository:
                         row.last_checked_at = last_checked_at
                     if post.get("post_created_at"):
                         row.post_created_at = post_created_at
+                    if post_text:
+                        row.text = post_text
 
     async def list_tracked_posts(self, *, active_only: bool = True) -> list[dict[str, Any]]:
         statement = select(TrackedPostRow)
@@ -621,9 +625,38 @@ class DatabaseRepository:
         statement = statement.order_by(TrackedPostRow.post_created_at.desc())
         async with self.sessions() as session:
             rows = (await session.scalars(statement)).all()
+            cycle = await session.get(ConfigRow, "current_cycle_id")
+            engagement: dict[str, dict[str, Any]] = {}
+            if cycle and rows:
+                for post_id, action_type, count, points in (
+                    await session.execute(
+                        select(
+                            ActionRow.source_post_id,
+                            ActionRow.action_type,
+                            func.count(),
+                            func.coalesce(func.sum(ActionRow.points), 0),
+                        )
+                        .where(
+                            ActionRow.cycle_id == cycle.value,
+                            ActionRow.active.is_(True),
+                            ActionRow.source_post_id.in_([row.tweet_id for row in rows]),
+                        )
+                        .group_by(ActionRow.source_post_id, ActionRow.action_type)
+                    )
+                ).all():
+                    entry = engagement.setdefault(
+                        post_id, {"actions": 0, "points": 0.0, "by_type": {}}
+                    )
+                    entry["actions"] += int(count)
+                    entry["points"] = round(entry["points"] + float(points or 0), 2)
+                    entry["by_type"][str(action_type)] = int(count)
         return [
             {
                 "tweet_id": row.tweet_id,
+                "text": getattr(row, "text", "") or "",
+                "engagement": engagement.get(
+                    row.tweet_id, {"actions": 0, "points": 0.0, "by_type": {}}
+                ),
                 "url": row.url,
                 "source_handle": row.source_handle,
                 "discovered_at": isoformat(row.discovered_at),
@@ -1057,6 +1090,19 @@ class DatabaseRepository:
                 )
             ).all()
             # twitterapi.io bills 15 credits per item returned and 10 per profile checked.
+            cycle_start = parse_datetime(started.value) if started and started.value else None
+            cycle_runs = (
+                (
+                    await session.scalars(
+                        select(ScanRunRow).where(
+                            ScanRunRow.started_at >= cycle_start, ScanRunRow.status == "complete"
+                        )
+                    )
+                ).all()
+                if cycle_start
+                else []
+            )
+            credits_this_cycle = sum(self._run_credits(run) for run in cycle_runs)
             credits_this_month = 0
             for run in month_runs:
                 summary = run.summary or {}
@@ -1077,8 +1123,19 @@ class DatabaseRepository:
             "cycle_started_at": started.value if started else "",
             "credits_this_month": credits_this_month,
             "scans_this_month": len(month_runs),
+            "credits_this_cycle": credits_this_cycle,
+            "scans_this_cycle": len(cycle_runs),
             "last_scan": self._scan_dict(last_scan, names) if last_scan else None,
         }
+
+    @staticmethod
+    def _run_credits(run: ScanRunRow) -> int:
+        """twitterapi.io bills 15 credits per item returned and 10 per profile checked."""
+        summary = run.summary or {}
+        items = int(summary.get("tweets_returned") or 0)
+        requests = int(summary.get("api_requests") or 0)
+        checked = int(summary.get("x_checked") or 0)
+        return max(items, requests) * 15 + checked * 10
 
     @staticmethod
     async def _overview_counts(session: AsyncSession, cycle_id: str) -> tuple[int, float, int, int]:
@@ -1292,6 +1349,73 @@ class DatabaseRepository:
                     }
                 )
         return changed
+
+    async def member_breakdown(self, discord_user_id: str) -> dict[str, Any] | None:
+        """A member plus the sum behind their score: counted actions by type, the ones that
+        scored 0, and manual adjustments. The parts add up to the score shown everywhere."""
+        async with self.sessions() as session:
+            row = await session.get(UserRow, discord_user_id)
+            if row is None:
+                return None
+            cycle = await session.get(ConfigRow, "current_cycle_id")
+            cycle_id = cycle.value if cycle else ""
+            by_type: dict[str, dict[str, Any]] = {}
+            for action_type, count, points, zero in (
+                await session.execute(
+                    select(
+                        ActionRow.action_type,
+                        func.count(),
+                        func.coalesce(func.sum(ActionRow.points), 0),
+                        func.coalesce(
+                            func.sum(case((ActionRow.points == 0, 1), else_=0)), 0
+                        ),
+                    )
+                    .where(
+                        ActionRow.discord_user_id == discord_user_id,
+                        ActionRow.cycle_id == cycle_id,
+                        ActionRow.active.is_(True),
+                    )
+                    .group_by(ActionRow.action_type)
+                )
+            ).all():
+                by_type[str(action_type)] = {
+                    "count": int(count),
+                    "points": round(float(points or 0), 2),
+                    "zero": int(zero or 0),
+                }
+            adjusted_count, adjusted_points = (
+                await session.execute(
+                    select(func.count(), func.coalesce(func.sum(ScoreAdjustmentRow.points), 0)).where(
+                        ScoreAdjustmentRow.discord_user_id == discord_user_id,
+                        ScoreAdjustmentRow.cycle_id == cycle_id,
+                    )
+                )
+            ).one()
+            removed = int(
+                await session.scalar(
+                    select(func.count())
+                    .select_from(ActionRow)
+                    .where(
+                        ActionRow.discord_user_id == discord_user_id,
+                        ActionRow.cycle_id == cycle_id,
+                        ActionRow.active.is_(False),
+                    )
+                )
+                or 0
+            )
+            member = self._linked_user(row)
+        return {
+            "member": asdict(member),
+            "breakdown": {
+                "by_type": by_type,
+                "adjustments": {
+                    "count": int(adjusted_count or 0),
+                    "points": round(float(adjusted_points or 0), 2),
+                },
+                "no_longer_counted": removed,
+                "total": member.score,
+            },
+        }
 
     async def set_user_active(self, discord_user_id: str, active: bool) -> LinkedUser | None:
         async with self.sessions.begin() as session:

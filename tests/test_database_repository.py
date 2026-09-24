@@ -658,3 +658,74 @@ async def test_role_protection_is_a_no_op_when_nothing_moved(
     again = await repository.apply_role_protection({"930": "Nucleus"})
     assert again == {"gained": [], "lost": []}
     assert await repository.apply_role_protection({}) == {"gained": [], "lost": []}
+
+
+@pytest.mark.asyncio
+async def test_member_breakdown_adds_up_to_the_score(repository: DatabaseRepository) -> None:
+    """The member page shows the sum behind a score; its parts must equal the score."""
+    from majors_lair_bot.models import ActionType, EngagementAction
+    from majors_lair_bot.orm import ActionRow
+    from majors_lair_bot.utils import isoformat, utc_now
+
+    now = utc_now()
+    cycle = (await repository.get_config())["current_cycle_id"]
+    await repository.link_user(
+        discord_user_id="940", discord_username="sum", twitter_handle="sum_x", twitter_user_id="s9"
+    )
+    rows = [("reply", 3.0, True), ("reply", 0.0, True), ("quote", 2.0, True), ("retweet", 1.0, False)]
+    async with repository.sessions.begin() as session:
+        for index, (kind, points, active) in enumerate(rows):
+            session.add(ActionRow(
+                action_key=f"b{index}", cycle_id=cycle, discord_user_id="940", twitter_user_id="s9",
+                twitter_handle="sum_x", action_type=kind, target_handle="major", source_post_id="p1",
+                action_tweet_id=f"bt{index}", action_url="", text="t", normalized_text="t",
+                content_hash=f"bh{index}", has_media=False, occurred_at=now, points=points,
+                reason="r", active=active, first_seen_at=now, last_seen_at=now,
+            ))
+    await repository.adjust_points(
+        discord_user_id="940", points=4, reason="bonus", actor_discord_id="1", cycle_id=cycle
+    )
+    actions = await repository.list_actions(cycle_id=cycle, include_inactive=True)
+    await repository.save_scored_actions(cycle_id=cycle, scored_actions=actions)
+
+    detail = await repository.member_breakdown("940")
+
+    assert detail is not None
+    parts = detail["breakdown"]
+    assert parts["by_type"]["reply"] == {"count": 2, "points": 3.0, "zero": 1}
+    assert parts["by_type"]["quote"] == {"count": 1, "points": 2.0, "zero": 0}
+    assert "retweet" not in parts["by_type"], "a removed action is not part of the score"
+    assert parts["no_longer_counted"] == 1
+    assert parts["adjustments"] == {"count": 1, "points": 4.0}
+    summed = sum(v["points"] for v in parts["by_type"].values()) + parts["adjustments"]["points"]
+    assert summed == detail["member"]["score"] == parts["total"] == 9.0
+    assert await repository.member_breakdown("nobody") is None
+
+
+@pytest.mark.asyncio
+async def test_tracked_posts_carry_text_and_engagement(repository: DatabaseRepository) -> None:
+    from majors_lair_bot.orm import ActionRow
+    from majors_lair_bot.utils import isoformat, utc_now
+
+    now = utc_now()
+    cycle = (await repository.get_config())["current_cycle_id"]
+    await repository.upsert_tracked_posts([{
+        "tweet_id": "777", "url": "https://x.com/m/status/777", "source_handle": "major",
+        "discovered_at": isoformat(now), "post_created_at": isoformat(now), "text": "gm lair",
+    }])
+    # A later write without text must not wipe what is stored.
+    await repository.upsert_tracked_posts([{"tweet_id": "777", "last_checked_at": isoformat(now)}])
+    async with repository.sessions.begin() as session:
+        for index, kind in enumerate(["reply", "reply", "quote"]):
+            session.add(ActionRow(
+                action_key=f"e{index}", cycle_id=cycle, discord_user_id="1", twitter_user_id="1",
+                twitter_handle="a", action_type=kind, target_handle="major", source_post_id="777",
+                action_tweet_id=f"et{index}", action_url="", text="t", normalized_text="t",
+                content_hash=f"eh{index}", has_media=False, occurred_at=now, points=2.0,
+                reason="r", active=True, first_seen_at=now, last_seen_at=now,
+            ))
+
+    posts = await repository.list_tracked_posts(active_only=False)
+
+    assert posts[0]["text"] == "gm lair"
+    assert posts[0]["engagement"] == {"actions": 3, "points": 6.0, "by_type": {"reply": 2, "quote": 1}}

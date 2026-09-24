@@ -560,3 +560,103 @@ input::placeholder, textarea::placeholder { color: var(--muted-2); }
   .members-table th.sortable { padding: 0; }
   .members-table .th-sort { padding: 11px 9px; }
 }
+
+/* ---- Typography: labels are words, not small caps in a code font ------------------------
+   Small uppercase labels set in a monospace face sat on almost every chip, table header
+   and form field. They read as a terminal, and made a label harder to read than the value
+   under it. Labels are now sentence case in the text face, a step smaller and quieter than
+   what they label. Monospace stays where the content is data: IDs, scores, timestamps. */
+.eyebrow, .nav-label, .system-pill, .metric > div, .scan-card label, .modal label,
+.config-group label, .adjust-fields label, th, .status, .action-chip, .boot, .fatal,
+.page-loading, .sub-heading, .estimate-grid dt, .report-grid h4, .report-block h4,
+.filter-count, .loading-row, .cycle-facts dt, .exclude-roles legend, .brand span, .panel-head > span {
+  text-transform: none;
+  letter-spacing: 0;
+  font-family: inherit;
+}
+th { font-size: 12px; font-weight: 600; color: var(--muted); }
+.th-sort { font-weight: 600; }
+.status { font-size: 12px; }
+.action-chip { font-size: 11.5px; text-transform: capitalize; }
+.scan-card label, .modal label, .config-group label, .adjust-fields label, .exclude-roles legend { font-size: 13px; font-weight: 600; color: #b3bcb7; }
+.estimate-grid dt, .cycle-facts dt, .report-grid dt { font-size: 12px; font-weight: 500; }
+.metric > div { font-size: 13px; }
+.sub-heading, .report-grid h4, .report-block h4 { font-size: 14px; font-weight: 600; color: var(--text); }
+.filter-count, .loading-row, .page-loading, .boot { font-size: 12px; }
+.system-pill { font-size: 12px; }
+.brand span { font-size: 12px; color: var(--muted); }
+.panel-head > span { font-size: 12px; color: var(--muted); }
+
+/* ---- Member page --------------------------------------------------------------------- */
+.back-link { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 16px; color: var(--muted); font-size: 13px; }
+.back-link:hover { color: var(--text); }
+.member-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
+.member-head h1 { margin: 0; font: 650 clamp(26px, 2.2vw, 34px)/1.05 Bahnschrift, "Arial Narrow", sans-serif; letter-spacing: -.03em; overflow-wrap: anywhere; }
+.member-sub { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 10px 0 0; color: var(--muted); }
+.member-layout { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 18px; margin-bottom: 18px; align-items: start; }
+.member-score, .member-facts-panel { padding-bottom: 6px; }
+.breakdown { width: 100%; border-collapse: collapse; }
+.breakdown th, .breakdown td { padding: 12px 22px; border-top: 1px solid var(--line-soft); text-align: left; font-size: 14px; }
+.breakdown th { color: var(--text); font-weight: 500; }
+.breakdown td.count { color: var(--muted); }
+.breakdown td.count small { display: block; margin-top: 2px; color: var(--muted-2); font-size: 12px; }
+.breakdown td.score { text-align: right; }
+.breakdown tfoot th, .breakdown tfoot td { border-top: 1px solid var(--line); font-weight: 650; }
+.breakdown td.total { color: var(--amber-bright); font-size: 18px; }
+.breakdown-note { margin: 4px 22px 16px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.fact-list { margin: 0; padding: 6px 22px 12px; }
+.fact-list > div { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line-soft); }
+.fact-list > div:last-child { border-bottom: 0; }
+.fact-list dt { color: var(--muted); font-size: 13px; }
+.fact-list dd { margin: 0; font-size: 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.fact-list dd small { flex: 0 0 100%; color: var(--muted); font-size: 12px; }
+.member-tool { margin-bottom: 18px; }
+.member-tool .edit-grid, .member-tool .adjust-form, .member-tool .member-scan-controls, .member-tool .import-summary { margin-left: 22px; margin-right: 22px; }
+.member-tool .edit-grid, .member-tool .adjust-form, .member-tool .member-scan-controls { padding-bottom: 20px; }
+.tool-note { margin: 0 22px 14px; max-width: 75ch; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.member-history { margin-bottom: 18px; }
+.history-table td.decision strong { font-weight: 500; }
+td.nowrap, .nowrap { white-space: nowrap; }
+@media (max-width: 1100px) { .member-layout { grid-template-columns: 1fr; } .member-head { flex-direction: column; align-items: flex-start; } }
+
+/* ---- Scan reports: what changed leads ---------------------------------------------------- */
+.what-changed { margin-bottom: 16px; }
+.changed-lead { margin: 0 0 14px; font-size: 15px; line-height: 1.6; max-width: 90ch; }
+.changed-lead strong { color: var(--amber-bright); }
+.changed-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
+.changed-grid > div { padding: 14px 16px; border: 1px solid var(--line); background: #0f1313; }
+.changed-grid h4 { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
+.changed-note { margin: -4px 0 8px; color: var(--muted); font-size: 12px; }
+.moved-list { margin: 0; padding: 0; list-style: none; }
+.moved-list li { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; font-size: 13px; border-bottom: 1px solid var(--line-soft); }
+.moved-list li:last-child { border-bottom: 0; }
+.moved-list li.more { color: var(--muted); }
+.report-details { margin-top: 14px; border: 1px solid var(--line-soft); }
+.report-details > summary { padding: 11px 14px; color: var(--muted); font-size: 13px; cursor: pointer; }
+.report-details > summary:hover { color: var(--text); }
+.report-details[open] > summary { border-bottom: 1px solid var(--line-soft); }
+.report-details > .report-head { display: flex; justify-content: flex-end; padding: 10px 14px 0; }
+
+/* ---- Tracked posts as a table ------------------------------------------------------------ */
+.posts-table td { vertical-align: top; }
+.post-cell { min-width: 320px; max-width: 560px; }
+.post-account { color: var(--amber); font-size: 12px; font-weight: 600; }
+.post-text { margin: 4px 0 6px; color: var(--text); font-size: 13.5px; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-line; }
+.post-text.missing { color: var(--muted-2); font-style: italic; }
+.post-open { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
+.posts-table td small.block { margin-top: 3px; }
+.state-col { text-align: right; }
+.post-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 10px; border: 1px solid var(--line-soft); background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; }
+.post-toggle.on { color: var(--green); border-color: #3f624d; }
+.post-toggle:hover { color: var(--text); border-color: #46504c; }
+
+/* ---- Overview: numbers that lead somewhere ----------------------------------------------- */
+.decision-grid .metric.decision { display: flex; flex-direction: column; color: inherit; text-decoration: none; transition: background .15s; }
+.decision-grid .metric.decision:hover { background: #141918; }
+.decision-grid .metric.decision:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
+.decision-grid .metric.decision.warn strong { color: var(--amber-bright); }
+.decision-action { display: inline-flex; align-items: center; gap: 4px; margin-top: auto; padding-top: 12px; color: var(--teal); font-size: 13px; }
+
+/* A points column header is a label: muted, and aligned with the numbers under it. Only a
+   header you sort by takes the accent. */
+th.score:not(.sortable) { color: var(--muted); text-align: right; }

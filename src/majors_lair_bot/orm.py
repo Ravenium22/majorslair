@@ -133,6 +133,9 @@ class TrackedPostRow(Base):
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     post_created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # What the post said, so the list can show it instead of a 19-digit id. Filled when a
+    # scan or a manual track reads the post; older rows fill in on the next scan.
+    text: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
 
 
 class ConfigRow(Base):

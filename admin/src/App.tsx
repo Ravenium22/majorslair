@@ -44,6 +44,7 @@ const AuditPage = lazyPage(() => import('./pages/AuditPage'))
 const ScansPage = lazyPage(() => import('./pages/ScansPage'))
 const LowActivityPage = lazyPage(() => import('./pages/LowActivityPage'))
 const HelpPage = lazyPage(() => import('./pages/HelpPage'))
+const MemberPage = lazyPage(() => import('./pages/MemberPage'))
 
 const routes = [
   { id: 'overview', label: 'Overview', icon: CircleGauge },
@@ -57,7 +58,9 @@ const routes = [
   { id: 'help', label: 'How it works', icon: CircleHelp },
 ] as const
 
-type RouteId = (typeof routes)[number]['id']
+// Pages reached from other pages rather than from the sidebar.
+const hiddenRoutes = ['member'] as const
+type RouteId = (typeof routes)[number]['id'] | (typeof hiddenRoutes)[number]
 
 const fetcher = <T,>(url: string) => api<T>(url)
 
@@ -81,7 +84,7 @@ function Shell({ session, children }: { session: Session; children: ReactNode })
   // Routes look like #members?points=low, so a filtered view can be reloaded or linked.
   const readRoute = () => {
     const hash = window.location.hash.slice(1).split('?')[0] as RouteId
-    return routes.some((item) => item.id === hash) ? hash : 'overview'
+    return routes.some((item) => item.id === hash) || (hiddenRoutes as readonly string[]).includes(hash) ? hash : 'overview'
   }
   const [route, setRoute] = useState<RouteId>(readRoute)
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -118,6 +121,7 @@ function Shell({ session, children }: { session: Session; children: ReactNode })
       case 'scans': return <ScansPage />
       case 'low-activity': return <LowActivityPage session={session} />
       case 'help': return <HelpPage />
+      case 'member': return <MemberPage session={session} />
       case 'scoring': return <ScoringPage session={session} />
       case 'audit': return <AuditPage />
       default: return <OverviewPage session={session} />
@@ -136,7 +140,7 @@ function Shell({ session, children }: { session: Session; children: ReactNode })
         </button>
         <div className="brand">
           <div className="brand-mark small"><ChartNoAxesColumnIncreasing size={20} /></div>
-          <div><strong>MAJOR'S LAIR</strong><span>ENGAGEMENT OPS</span></div>
+          <div><strong>MAJOR'S LAIR</strong><span>Engagement dashboard</span></div>
         </div>
         <nav>
           {routes.map((item) => {
@@ -145,7 +149,7 @@ function Shell({ session, children }: { session: Session; children: ReactNode })
               <a
                 key={item.id}
                 href={`#${item.id}`}
-                className={route === item.id ? 'active' : ''}
+                className={route === item.id || (route === 'member' && item.id === 'members') ? 'active' : ''}
                 onClick={(event) => {
                   // Plain left-click navigates in place; modified clicks and right-click
                   // "open in new tab" keep the browser's default link behaviour.
@@ -176,7 +180,7 @@ function Shell({ session, children }: { session: Session; children: ReactNode })
       </aside>
       <main className="workspace">
         <PageErrorBoundary key={route}>
-          <Suspense fallback={<div className="page-loading"><span /> Loading control surface…</div>}>
+          <Suspense fallback={<div className="page-loading"><span /> Loading…</div>}>
             {page}
           </Suspense>
         </PageErrorBoundary>
@@ -261,7 +265,7 @@ export default function App() {
   })
 
   if (isLoading) {
-    return <div className="boot"><div className="brand-mark"><ChartNoAxesColumnIncreasing /></div><span>Initializing console</span></div>
+    return <div className="boot"><div className="brand-mark"><ChartNoAxesColumnIncreasing /></div><span>Loading the dashboard…</span></div>
   }
   if (error?.status === 401 || error?.status === 403 || !data) return <Login />
   if (error) return <div className="fatal"><h1>Console unavailable</h1><p>{error.message}</p></div>

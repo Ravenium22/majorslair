@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { Activity, AlertTriangle, ArrowUpRight, Check, Clock3, LoaderCircle, Play, Radar, RotateCcw, Trophy, Users } from 'lucide-react'
+import { AlertTriangle, ArrowUpRight, Check, Clock3, Coins, Link2Off, LoaderCircle, Play, RotateCcw, UserRoundMinus, UserRoundSearch } from 'lucide-react'
 import useSWR from 'swr'
 import { api, formatCount, formatDate, formatScore, formatUsd, mutateApi } from '../api'
 import { Empty, HelpLink, PageHeader, Status, Toast, useEscape } from '../components'
-import type { LinkedUser, LowActivityReport, Overview, ScanEstimate, Session } from '../types'
+import type { LinkedUser, LowActivityReport, Overview, Paginated, ScanEstimate, Session } from '../types'
 
 const WINDOWS = [['cycle', 'Whole cycle'], ['30d', 'Last 30 days'], ['60d', 'Last 60 days'], ['90d', 'Last 90 days'], ['180d', 'Last 6 months'], ['365d', 'Last 12 months']] as const
 
@@ -46,6 +46,9 @@ export default function OverviewPage({ session }: { session: Session }) {
   const [confirmation, setConfirmation] = useState('')
   const [resetting, setResetting] = useState(false)
   const { data: lowActivity } = useSWR<LowActivityReport>('/api/low-activity', api)
+  const { data: notFollowing } = useSWR<Paginated<LinkedUser>>('/api/users?active=true&follows=missing&page_size=1', api)
+  const { data: unchecked } = useSWR<Paginated<LinkedUser>>('/api/users?active=true&linked=true&follows=unchecked&page_size=1', api)
+  const { data: unlinked } = useSWR<Paginated<LinkedUser>>('/api/users?active=true&linked=false&page_size=1', api)
   const [now, setNow] = useState(() => Date.now())
   const running = data?.last_scan?.status === 'running'
   const wasRunning = useRef(false)
@@ -130,28 +133,64 @@ export default function OverviewPage({ session }: { session: Session }) {
   const totalHigh = baseHigh + verifyCredits + timelineCredits
   const usd = formatUsd
 
-  const metrics = [
-    { label: 'Members scoring', value: data?.linked_members ?? 0, icon: Users, detail: 'have linked an X account' },
-    { label: 'Points this cycle', value: formatScore(data?.total_score ?? 0), icon: Trophy, detail: 'awarded since the last reset' },
-    { label: 'Actions counted', value: data?.active_actions ?? 0, icon: Activity, detail: 'replies, quotes, retweets, mentions' },
-    { label: 'Posts watched', value: data?.tracked_posts ?? 0, icon: Radar, detail: 'from the two tracked accounts' },
+  // Four numbers that each lead to a list you act on. The old four (members, points,
+  // actions, posts) described the system; none of them told you what to do next.
+  const followsChecked = (unchecked?.total ?? 0) < (data?.linked_members ?? 0)
+  const decisions = [
+    {
+      label: 'On the purge list',
+      value: lowActivity ? formatCount(lowActivity.items.length) : '—',
+      detail: lowActivity ? `at or below ${formatScore(lowActivity.threshold)} points, protected and new members left out` : 'members to review',
+      href: '#low-activity',
+      action: 'Review the list',
+      icon: UserRoundMinus,
+      tone: lowActivity && lowActivity.items.length ? 'warn' : '',
+    },
+    {
+      label: 'Not following both accounts',
+      value: followsChecked ? formatCount(notFollowing?.total ?? 0) : '—',
+      detail: followsChecked ? 'proven by the last follow check' : 'no follow check has been run yet',
+      href: followsChecked ? '#members?follows=missing' : '#members',
+      action: followsChecked ? 'See who' : 'Run Check follows',
+      icon: UserRoundSearch,
+      tone: followsChecked && notFollowing?.total ? 'warn' : '',
+    },
+    {
+      label: 'Cannot score yet',
+      value: formatCount(unlinked?.total ?? 0),
+      detail: 'in the server with no X account linked',
+      href: '#members?view=unlinked',
+      action: 'See who',
+      icon: Link2Off,
+      tone: '',
+    },
+    {
+      label: 'Spent this cycle',
+      value: data?.credits_this_cycle !== undefined ? formatUsd(data.credits_this_cycle) : '—',
+      detail: `${data?.scans_this_cycle ?? 0} scan${data?.scans_this_cycle === 1 ? '' : 's'} since the last reset · ${formatUsd(data?.credits_this_month ?? 0)} this month`,
+      href: '#scans',
+      action: 'Scan reports',
+      icon: Coins,
+      tone: '',
+    },
   ]
 
   return (
     <div className="page">
       <PageHeader
         title="Engagement overview"
-        copy="The current leaderboard cycle, scoring activity, and scan health at a glance."
+        copy="What needs your attention this cycle. Each number opens the list behind it."
         actions={<div className="system-pill"><i className={data?.bot_connected ? '' : 'offline'} /> Discord bot {data?.bot_connected ? 'online' : 'starting'}</div>}
       />
       {notice && <Toast message={notice.text} kind={notice.kind} />}
-      <section className="metric-grid">
-        {metrics.map(({ label, value, icon: Icon, detail }) => (
-          <article className="metric" key={label}>
-            <div><span>{label}</span><Icon size={18} /></div>
+      <section className="metric-grid decision-grid">
+        {decisions.map(({ label, value, icon: Icon, detail, href, action, tone }) => (
+          <a className={`metric decision ${tone}`} key={label} href={href}>
+            <div><span>{label}</span><Icon size={18} aria-hidden="true" /></div>
             <strong>{isLoading ? '—' : value}</strong>
             <small>{detail}</small>
-          </article>
+            <span className="decision-action">{action} <ArrowUpRight size={14} aria-hidden="true" /></span>
+          </a>
         ))}
       </section>
       <section className="panel cycle-panel">
@@ -186,7 +225,7 @@ export default function OverviewPage({ session }: { session: Session }) {
                 <div className="leader-row" key={user.discord_user_id}>
                   <span className={`rank rank-${index + 1}`}>{String(index + 1).padStart(2, '0')}</span>
                   <div className="leader-avatar">{user.discord_username.slice(0, 1).toUpperCase()}</div>
-                  <span className="member-cell"><strong>{user.discord_username}</strong><small>@{user.twitter_handle}</small></span>
+                  <a className="member-cell linked-cell" href={`#member?id=${user.discord_user_id}`}><strong>{user.discord_username}</strong><small>@{user.twitter_handle}</small></a>
                   <div className="score-bar" aria-hidden="true"><i style={{ width: `${barWidth(user.score)}%` }} /></div>
                   <strong className="score">{formatScore(user.score)}</strong>
                 </div>

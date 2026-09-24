@@ -44,7 +44,8 @@ export function PageHeader({
 
 export function Status({ state }: { state: string }) {
   const value = state.toLowerCase()
-  return <span className={`status ${value}`}><i />{state}</span>
+  // States arrive as data ("complete", "running"); written as a word, not shouted.
+  return <span className={`status ${value}`}><i />{value.charAt(0).toUpperCase() + value.slice(1)}</span>
 }
 
 export function Empty({ title, copy }: { title: string; copy: string }) {

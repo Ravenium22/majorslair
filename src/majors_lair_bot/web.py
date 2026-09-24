@@ -1054,6 +1054,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         return {**removed, "ignored_in_sync": ignored}
 
+    @app.get("/api/users/{discord_user_id}")
+    async def member_detail(discord_user_id: str, _: Admin) -> dict[str, Any]:
+        """One member and the arithmetic behind their score, for the member page."""
+        if not discord_user_id.isdigit():
+            raise HTTPException(status_code=404, detail="No member with that Discord ID")
+        detail = await runtime.repository.member_breakdown(discord_user_id)
+        if detail is None:
+            raise HTTPException(status_code=404, detail="No member with that Discord ID")
+        return detail
+
     @app.get("/api/users/{discord_user_id}/adjustments")
     async def member_adjustments(discord_user_id: str, _: Admin) -> list[dict[str, Any]]:
         return await runtime.repository.list_adjustments(discord_user_id)

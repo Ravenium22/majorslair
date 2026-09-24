@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react'
-import { AlertTriangle, ArrowLeftRight, BadgeCheck, Download, ExternalLink, FileUp, Pencil, Plus, RefreshCw, Search, Shield, ShieldCheck, ShieldOff, Tags, Trash2, UserRoundCheck, UserRoundSearch, UserRoundX, X } from 'lucide-react'
+import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react'
+import { BadgeCheck, Download, FileUp, Pencil, Plus, RefreshCw, Search, Shield, ShieldCheck, Tags, UserRoundCheck, UserRoundSearch, UserRoundX } from 'lucide-react'
 import useSWR from 'swr'
 import { api, formatCount, formatDate, formatDay, formatScore, formatUsd, mutateApi } from '../api'
 import { Empty, HelpLink, Loading, PageHeader, Pagination, RoleExclusionPicker, SortTh, Toast, ToolsMenu, useConfirm, useEscape } from '../components'
 import { parseCsv, rowsFromSheet, type ImportRow } from '../csv'
-import type { Action, Adjustment, DiscordRole, DiscordSyncResponse, FollowCheckResult, FollowEstimate, ImportResponse, ImportStatus, LinkedUser, MemberScanResult, Paginated, RoleBulkResult, Session, VerifyResponse } from '../types'
+import type { DiscordRole, DiscordSyncResponse, FollowCheckResult, FollowEstimate, ImportResponse, ImportStatus, LinkedUser, Paginated, RoleBulkResult, Session, VerifyResponse } from '../types'
 
 const STATUS_LABEL: Record<ImportStatus, string> = { linked: 'Linked', relinked: 'Handle updated', unchanged: 'Already linked', registered: 'Registered, no X', skipped: 'Skipped', conflict: 'Conflict', failed: 'Failed' }
 const STATUS_TONE: Record<ImportStatus, string> = { linked: 'complete', relinked: 'complete', unchanged: 'active', registered: 'running', skipped: '', conflict: 'failed', failed: 'failed' }
@@ -83,18 +83,6 @@ export default function MembersPage({ session }: { session: Session }) {
   const [importResult, setImportResult] = useState<ImportResponse>()
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState<DiscordSyncResponse>()
-  const [selected, setSelected] = useState<LinkedUser>()
-  const [memberPeriod, setMemberPeriod] = useState('30d')
-  const [memberDepthTweets, setMemberDepthTweets] = useState(500)
-  const memberDepth = Math.min(250, Math.max(1, Math.ceil(memberDepthTweets / 20)))
-  const [memberScanning, setMemberScanning] = useState(false)
-  const [memberScan, setMemberScan] = useState<MemberScanResult>()
-  const [tool, setTool] = useState<'none' | 'edit' | 'points' | 'scan'>('none')
-  const [saving, setSaving] = useState(false)
-  const { data: history, mutate: mutateHistory } = useSWR<Paginated<Action>>(selected ? `/api/actions?discord_user_id=${selected.discord_user_id}&page_size=100` : null, api)
-  const { data: adjustments, mutate: mutateAdjustments } = useSWR<Adjustment[]>(selected ? `/api/users/${selected.discord_user_id}/adjustments` : null, api)
-  const [adjustMode, setAdjustMode] = useState<'add' | 'transfer'>('add')
-  const [adjusting, setAdjusting] = useState(false)
   const [verifying, setVerifying] = useState(false)
   const [verifyResult, setVerifyResult] = useState<VerifyResponse>()
   const [verifyPlan, setVerifyPlan] = useState<{ linked: number; protectedLinked: number }>()
@@ -139,6 +127,9 @@ export default function MembersPage({ session }: { session: Session }) {
     const onHash = () => {
       if (window.location.hash.split('?')[0] !== '#members') return
       const next = hashParams()
+      // Forward an old drawer link before touching any state: a state change here would
+      // re-write the address back to the Members list after the forward.
+      if (next.get('open')) { window.location.replace(`#member?id=${next.get('open')}`); return }
       setSearch(next.get('search') ?? '')
       setFilter(next.get('active') ?? 'active')
       setSegment(SEGMENTS.find((item) => item.id === next.get('view'))?.id ?? 'everyone')
@@ -148,7 +139,6 @@ export default function MembersPage({ session }: { session: Session }) {
       setJoined(JOINED.find((item) => item.id === next.get('joined'))?.id ?? 'any')
       setFollows(FOLLOWS.find((item) => item.id === next.get('follows'))?.id ?? 'any')
       setSort(SORTS.find((item) => item.id === next.get('sort'))?.id ?? 'score_desc')
-      setPendingOpen(next.get('open') ?? '')
       setPage(1)
     }
     window.addEventListener('hashchange', onHash)
@@ -168,19 +158,23 @@ export default function MembersPage({ session }: { session: Session }) {
     if (follows !== 'any') params.set('follows', follows)
     if (sort !== 'score_desc') params.set('sort', sort)
     const next = params.toString()
+    // Only ever rewrite a Members address; never pull someone back from a page they left for.
+    if (window.location.hash.split('?')[0] !== '#members') return
     const target = `#members${next ? `?${next}` : ''}`
     if (window.location.hash !== target) window.history.replaceState(null, '', target)
   }, [search, filter, segment, protection, points, lowThreshold, joined, follows, sort])
   const { data, mutate, isLoading } = useSWR<Paginated<LinkedUser>>(`/api/users?${query}`, api)
-  // A link of the form #members?search=<id>&open=<id> opens that member's drawer directly, so
-  // another page can hand over to the evidence instead of describing where to find it.
-  const [pendingOpen, setPendingOpen] = useState(() => initial.get('open') ?? '')
+  // Links from before the member page existed (#members?open=<id>) still land on the member.
   useEffect(() => {
-    if (!pendingOpen || !data) return
-    const match = data.items.find((item) => item.discord_user_id === pendingOpen)
-    if (match) openMember(match)
-    setPendingOpen('')
-  }, [pendingOpen, data])
+    const legacy = initial.get('open')
+    if (legacy) window.location.replace(`#member?id=${legacy}`)
+  }, [initial])
+  useEffect(() => {
+    const note = sessionStorage.getItem('member-deleted')
+    if (!note) return
+    sessionStorage.removeItem('member-deleted')
+    setNotice({ text: note, kind: 'success' })
+  }, [])
   const confirm = useConfirm()
   const resetPage = <T,>(setter: (value: T) => void) => (value: T) => { setter(value); setPage(1) }
   const currentFilters: FilterState = { filter, segment, protection, points, joined, follows }
@@ -209,20 +203,18 @@ export default function MembersPage({ session }: { session: Session }) {
       await mutate()
     } catch (error) { setNotice({ text: error instanceof Error ? error.message : 'Update failed', kind: 'error' }) }
   }
-  const [confirmDeactivate, setConfirmDeactivate] = useState<LinkedUser>()
-  // Deleting is separate from deactivating: it erases the record instead of parking it.
-  const [confirmDelete, setConfirmDelete] = useState<LinkedUser>()
-  const [deleteConfirmText, setDeleteConfirmText] = useState('')
-  const [deleteIgnore, setDeleteIgnore] = useState(true)
-  const [deleting, setDeleting] = useState(false)
   const toggleActive = async (user: LinkedUser) => {
-    if (user.active) { setConfirmDeactivate(user); return }
-    if (!(await confirm({
+    if (!(await confirm(user.active ? {
+      title: `Deactivate ${user.discord_username}?`,
+      body: 'They drop out of the leaderboard, the low-activity report and every scan. Their history and points are kept, and you can reactivate them at any time.',
+      confirmLabel: 'Deactivate',
+      tone: 'danger',
+    } : {
       title: `Reactivate ${user.discord_username}?`,
       body: 'They go back on the leaderboard with the points and history they had, and the next scans include them again.',
       confirmLabel: 'Reactivate',
     }))) return
-    return patch(user, { active: true }, `${user.discord_username} reactivated.`)
+    return patch(user, { active: !user.active }, `${user.discord_username} ${user.active ? 'deactivated' : 'reactivated'}.`)
   }
   const toggleProtected = async (user: LinkedUser) => {
     const protecting = !user.special_role
@@ -334,7 +326,7 @@ export default function MembersPage({ session }: { session: Session }) {
   const withHandles = importRows.filter((row) => row.twitter_handle).length
   const withSpecial = importRows.filter((row) => row.special_role).length
 
-  const openMember = (user: LinkedUser) => { setSelected(user); setTool('none'); setMemberScan(undefined) }
+  const openMember = (user: LinkedUser) => { window.location.hash = `#member?id=${user.discord_user_id}` }
 
   const usingPicked = picked.length > 0
   const roleFilters = () => ({
@@ -417,94 +409,8 @@ export default function MembersPage({ session }: { session: Session }) {
     finally { setRoleBusy(false) }
   }
 
-  const submitAdjust = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    if (!selected) return
-    const form = new FormData(event.currentTarget)
-    const points = Number(form.get('points'))
-    const reason = String(form.get('reason') ?? '').trim()
-    const transfer_to = adjustMode === 'transfer' ? String(form.get('transfer_to') ?? '').trim() : ''
-    if (!points || Number.isNaN(points)) { setNotice({ text: 'Enter a non-zero amount', kind: 'error' }); return }
-    if (adjustMode === 'transfer' && !transfer_to) { setNotice({ text: 'Enter who receives the points', kind: 'error' }); return }
-    const formElement = event.currentTarget
-    const reasonNote = reason ? ` Reason recorded: "${reason}".` : ''
-    if (!(await confirm(adjustMode === 'transfer' ? {
-      title: `Move ${formatScore(Math.abs(points))} points from ${selected.discord_username} to ${transfer_to}?`,
-      body: `Both members' totals change now and the leaderboard follows.${reasonNote} To undo it, transfer the points back.`,
-      confirmLabel: 'Move points',
-    } : {
-      title: `${points > 0 ? 'Add' : 'Take away'} ${formatScore(Math.abs(points))} points ${points > 0 ? 'for' : 'from'} ${selected.discord_username}?`,
-      body: `Their total changes now and the leaderboard follows.${reasonNote} To undo it, make the opposite adjustment.`,
-      confirmLabel: points > 0 ? 'Add points' : 'Take points away',
-      tone: points > 0 ? 'default' : 'danger',
-    }))) return
-    setAdjusting(true)
-    try {
-      const result = await mutateApi<{ member: LinkedUser | null }>(`/api/users/${selected.discord_user_id}/adjust`, session.csrf_token, 'POST', { points: adjustMode === 'transfer' ? Math.abs(points) : points, reason, transfer_to: transfer_to || null })
-      if (result.member) setSelected(result.member)
-      setNotice({ text: adjustMode === 'transfer' ? `Moved ${formatScore(Math.abs(points))} points from ${selected.discord_username} to ${transfer_to}.` : `${points > 0 ? '+' : ''}${formatScore(points)} points for ${selected.discord_username}.`, kind: 'success' })
-      formElement.reset()
-      await Promise.all([mutate(), mutateAdjustments()])
-    } catch (error) { setNotice({ text: error instanceof Error ? error.message : 'Adjustment failed', kind: 'error' }) }
-    finally { setAdjusting(false) }
-  }
 
-  const runMemberScan = async () => {
-    if (!selected) return
-    if (!(await confirm({
-      title: `Scan ${selected.discord_username}'s timeline?`,
-      body: `Reads up to ${formatCount(memberDepthTweets)} of their latest tweets for the chosen window. It costs at most ${formatUsd(memberDepth * 20 * 15)}, usually much less because it stops at the window start. Anything newly matched is scored straight away.`,
-      confirmLabel: 'Scan this member',
-      tone: 'cost',
-    }))) return
-    setMemberScanning(true)
-    try {
-      const result = await mutateApi<MemberScanResult>(`/api/users/${selected.discord_user_id}/scan`, session.csrf_token, 'POST', { period: memberPeriod, max_pages: memberDepth })
-      setMemberScan(result)
-      setSelected({ ...selected, score: result.points_after })
-      setNotice({ text: `${result.discord_username}: ${result.matched} actions matched, ${result.new_actions} new, ${formatScore(result.points_before)} → ${formatScore(result.points_after)} pts.`, kind: 'success' })
-      await Promise.all([mutate(), mutateHistory()])
-    } catch (error) { setNotice({ text: error instanceof Error ? error.message : 'Member scan failed', kind: 'error' }) }
-    finally { setMemberScanning(false) }
-  }
-  // The edit form is uncontrolled, so "has anything changed" is read off the form itself
-  // and compared with the member as loaded. Escape used to throw the work away silently.
-  const editForm = useRef<HTMLFormElement>(null)
-  const [confirmDiscard, setConfirmDiscard] = useState<'drawer' | 'tool'>()
-  const editDirty = () => {
-    const form = editForm.current
-    if (!form || tool !== 'edit' || !selected) return false
-    const data = new FormData(form)
-    return String(data.get('discord_username') ?? '').trim() !== selected.discord_username
-      || String(data.get('twitter_handle') ?? '').trim().replace(/^@/, '') !== (selected.twitter_handle ?? '')
-      || (data.get('special_role') === 'on') !== selected.special_role
-      || String(data.get('special_role_names') ?? '').trim() !== (selected.special_role_names ?? '')
-  }
-  const closeMember = () => { if (saving) return; if (editDirty()) { setConfirmDiscard('drawer'); return } setSelected(undefined); setTool('none') }
-  const closeEditTool = () => { if (saving) return; if (editDirty()) { setConfirmDiscard('tool'); return } setTool('none') }
-  const discardEdit = () => { const where = confirmDiscard; setConfirmDiscard(undefined); if (where === 'drawer') { setSelected(undefined) } setTool('none') }
 
-  const removeMember = async (user: LinkedUser) => {
-    setDeleting(true)
-    try {
-      const result = await mutateApi<{ actions: number; adjustments: number; ignored_in_sync: boolean }>(
-        `/api/users/${user.discord_user_id}?ignore_in_sync=${deleteIgnore}`,
-        session.csrf_token,
-        'DELETE',
-      )
-      setConfirmDelete(undefined)
-      setDeleteConfirmText('')
-      setSelected(undefined)
-      setTool('none')
-      setPicked((current) => current.filter((id) => id !== user.discord_user_id))
-      setNotice({
-        text: `${user.discord_username} deleted, along with ${result.actions} scored action${result.actions === 1 ? '' : 's'} and ${result.adjustments} adjustment${result.adjustments === 1 ? '' : 's'}.${result.ignored_in_sync ? ' Sync from Discord will not add them back.' : ''}`,
-        kind: 'success',
-      })
-      await mutate()
-    } catch (error) { setNotice({ text: error instanceof Error ? error.message : 'Delete failed', kind: 'error' }) }
-    finally { setDeleting(false) }
-  }
 
   const openFollowCheck = async () => {
     setFollowBusy(true)
@@ -524,52 +430,12 @@ export default function MembersPage({ session }: { session: Session }) {
     finally { setFollowBusy(false) }
   }
 
-  const saveEdit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    if (!selected) return
-    const form = new FormData(event.currentTarget)
-    const discord_username = String(form.get('discord_username') ?? '').trim()
-    const twitter_handle = String(form.get('twitter_handle') ?? '').trim().replace(/^@/, '')
-    const special_role = form.get('special_role') === 'on'
-    const special_role_names = String(form.get('special_role_names') ?? '').trim()
-    const changes: string[] = []
-    if (discord_username && discord_username !== selected.discord_username) changes.push(`Discord handle becomes ${discord_username}`)
-    if (twitter_handle && twitter_handle.toLowerCase() !== selected.twitter_handle.toLowerCase()) changes.push(`X account becomes @${twitter_handle}, checked on X before it is saved`)
-    if (special_role !== selected.special_role) changes.push(special_role ? 'protected by hand' : 'protection set by hand is removed')
-    else if (special_role && special_role_names !== selected.special_role_names) changes.push(`protection label becomes "${special_role_names}"`)
-    if (!changes.length) { setTool('none'); setNotice({ text: 'Nothing changed.', kind: 'success' }); return }
-    if (!(await confirm({
-      title: `Save changes to ${selected.discord_username}?`,
-      body: <ul className="confirm-list">{changes.map((change) => <li key={change}>{change}</li>)}</ul>,
-      confirmLabel: 'Save changes',
-    }))) return
-    setSaving(true)
-    try {
-      const body: Record<string, unknown> = {}
-      if (discord_username && discord_username !== selected.discord_username) body.discord_username = discord_username
-      if (special_role !== selected.special_role || special_role_names !== selected.special_role_names) { body.special_role = special_role; body.special_role_names = special_role ? special_role_names : '' }
-      let updated = selected
-      if (Object.keys(body).length) updated = await mutateApi<LinkedUser>(`/api/users/${selected.discord_user_id}`, session.csrf_token, 'PATCH', body)
-      if (twitter_handle && twitter_handle.toLowerCase() !== selected.twitter_handle.toLowerCase()) {
-        await mutateApi('/api/users/link', session.csrf_token, 'POST', { discord_user_id: selected.discord_user_id, discord_username: discord_username || selected.discord_username, twitter_handle })
-        const fresh = await api<Paginated<LinkedUser>>(`/api/users?search=${encodeURIComponent(selected.discord_user_id)}&page_size=1`)
-        updated = fresh.items[0] ?? updated
-      }
-      setSelected(updated)
-      setTool('none')
-      setNotice({ text: `${updated.discord_username} updated.`, kind: 'success' })
-      await Promise.all([mutate(), mutateHistory()])
-    } catch (error) { setNotice({ text: error instanceof Error ? error.message : 'Update failed', kind: 'error' }) }
-    finally { setSaving(false) }
-  }
 
-  const anyModal = Boolean(followPlan || followResult || confirmDelete || confirmDeactivate || showLink || showImport || showRoles || selected || syncResult || verifyResult || verifyPlan)
-  const anyBusy = importing || saving || roleBusy || verifying || memberScanning || syncing || adjusting || followBusy
-  useEscape(anyModal && !anyBusy && !confirmDiscard, () => {
-    if (selected && editDirty()) { setConfirmDiscard('drawer'); return }
-    setShowLink(false); setShowImport(false); setShowRoles(false); setSelected(undefined); setTool('none'); setSyncResult(undefined); setVerifyResult(undefined); setVerifyPlan(undefined); setFollowPlan(undefined); setFollowResult(undefined)
+  const anyModal = Boolean(followPlan || followResult || showLink || showImport || showRoles || syncResult || verifyResult || verifyPlan)
+  const anyBusy = importing || roleBusy || verifying || syncing || followBusy
+  useEscape(anyModal && !anyBusy, () => {
+    setShowLink(false); setShowImport(false); setShowRoles(false); setSyncResult(undefined); setVerifyResult(undefined); setVerifyPlan(undefined); setFollowPlan(undefined); setFollowResult(undefined)
   })
-  useEscape(Boolean(confirmDiscard), () => setConfirmDiscard(undefined))
 
   return <div className="page">
     <PageHeader title="Linked members" copy="Everyone in the community, with or without an X account. Protected members never appear in the low-activity report." actions={<button className="button primary" onClick={() => setShowLink(true)}><Plus size={17} /> Link member</button>} toolbar={<>
@@ -621,14 +487,14 @@ export default function MembersPage({ session }: { session: Session }) {
             link and three icon buttons, was invalid nesting and roughly 125 tab stops. */}
         {data?.items.map((user) => <tr key={user.discord_user_id} className={`member-row ${picked.includes(user.discord_user_id) ? 'picked' : ''}`} onClick={() => openMember(user)}>
           <td className="pick-cell" onClick={(e) => e.stopPropagation()}><label className="pick-box"><input type="checkbox" checked={picked.includes(user.discord_user_id)} aria-label={`Select ${user.discord_username}`} onChange={(e) => setPicked(e.target.checked ? [...picked, user.discord_user_id] : picked.filter((id) => id !== user.discord_user_id))} /></label></td>
-          <td><button type="button" className="member-cell linked-cell" onClick={(e) => { e.stopPropagation(); openMember(user) }}><strong>{user.discord_username}{!user.active && <span className="status failed inline-status"><i />Inactive</span>}</strong><small className="mono">{user.discord_user_id}</small></button></td>
+          <td><a className="member-cell linked-cell" href={`#member?id=${user.discord_user_id}`} onClick={(e) => e.stopPropagation()}><strong>{user.discord_username}{!user.active && <span className="status failed inline-status"><i />Inactive</span>}</strong><small className="mono">{user.discord_user_id}</small></a></td>
           <td>{user.twitter_user_id ? <span className="protected-cell"><a href={`https://x.com/${user.twitter_handle}`} target="_blank" rel="noreferrer">@{user.twitter_handle}</a>{(user.x_status === 'suspended' || user.x_status === 'unavailable') && <span className="status failed"><i />X {user.x_status}</span>}{user.follows_primary === 'yes' && user.follows_secondary === 'yes' ? <small className="follow-ok">follows both</small> : user.follows_primary === 'no' || user.follows_secondary === 'no' ? <small className="follow-missing" title={user.follows_primary === 'no' && user.follows_secondary === 'no' ? 'Follows neither tracked account' : user.follows_primary === 'no' ? 'Does not follow the primary account' : 'Does not follow the secondary account'}>{user.follows_primary === 'no' && user.follows_secondary === 'no' ? 'follows neither' : 'missing a follow'}</small> : null}</span> : <span className="muted">Not linked</span>}</td>
           <td>{user.special_role ? <span className="protected-cell"><span className="status complete"><i />Protected</span><small title={user.role_protected_names ? 'Granted by a Discord role. Removing the role in Discord removes this at the next sync.' : 'Set here by hand. Sync never changes it.'}>{user.role_protected_names ? `role: ${user.role_protected_names}` : `by hand${user.special_role_names ? `: ${user.special_role_names}` : ''}`}</small></span> : <span className="muted">—</span>}</td>
           <td className="score">{formatScore(user.score)}</td>
           <td title={user.last_active_at ? formatDate(user.last_active_at) : undefined}>{formatDay(user.last_active_at)}</td>
           <td>{user.discord_joined_at ? <span className="protected-cell">{formatDay(user.discord_joined_at)}<small>{daysAgo(user.discord_joined_at)} days ago</small></span> : <span className="muted" title="Run Sync from Discord to fill join dates">—</span>}</td>
           <td className="row-actions" onClick={(e) => e.stopPropagation()}>
-            <button className="icon-button" title="Edit this member" aria-label={`Edit ${user.discord_username}`} onClick={() => { openMember(user); setTool('edit') }}><Pencil size={17} /></button>
+            <button className="icon-button" title="Edit this member" aria-label={`Edit ${user.discord_username}`} onClick={() => { window.location.hash = `#member?id=${user.discord_user_id}&tool=edit` }}><Pencil size={17} /></button>
             {/* Shield and ShieldOff differ by one diagonal stroke, and one of these buttons
                 takes a member out of the removal list. The state is named, not drawn. */}
             <button className={`icon-button labelled ${user.special_role ? 'on' : ''}`} title={user.special_role ? 'Protected from the low-activity report. Click to remove protection.' : 'Not protected. Click to protect from the low-activity report.'} aria-pressed={user.special_role} aria-label={`${user.special_role ? 'Remove protection from' : 'Protect'} ${user.discord_username}`} onClick={() => toggleProtected(user)}>{user.special_role ? <ShieldCheck size={17} /> : <Shield size={17} />}<span>{user.special_role ? 'Protected' : 'Protect'}</span></button>
@@ -640,64 +506,6 @@ export default function MembersPage({ session }: { session: Session }) {
       {!isLoading && !data?.items.length && <Empty title="No matching members" copy="Change the filters, sync from Discord, or import the community sheet." />}
       <Pagination page={page} size={25} total={data?.total ?? 0} onChange={setPage} />
     </section>
-
-    {confirmDiscard && <div className="modal-backdrop stacked" onMouseDown={() => setConfirmDiscard(undefined)}><div className="modal modal-narrow" onMouseDown={(e) => e.stopPropagation()}>
-      <div className="modal-icon danger-icon"><AlertTriangle /></div><h2>Discard your changes?</h2>
-      <p>You have edits to {selected?.discord_username} that have not been saved. Closing now throws them away.</p>
-      <div className="modal-actions"><button className="button ghost" onClick={() => setConfirmDiscard(undefined)}>Keep editing</button><button className="button danger" onClick={discardEdit}>Discard</button></div>
-    </div></div>}
-
-    {selected && <div className="modal-backdrop" onMouseDown={closeMember}><div className="modal modal-wide member-drawer" onMouseDown={(e) => e.stopPropagation()}>
-      <button className="icon-button drawer-close" onClick={closeMember} aria-label="Close"><X size={18} /></button>
-      <h2>{selected.discord_username} <small className="mono">{selected.discord_user_id}</small></h2>
-      <div className="member-facts">
-        <span>{selected.twitter_user_id ? <a href={`https://x.com/${selected.twitter_handle}`} target="_blank">@{selected.twitter_handle}</a> : <em className="muted">no X linked</em>}</span>
-        <span className="score">{formatScore(selected.score)} pts this cycle</span>
-        {selected.special_role && <span className="status complete" title={selected.role_protected_names ? `Granted by the Discord role ${selected.role_protected_names}. Removing that role in Discord drops the protection at the next sync.` : 'Set here by an admin. Sync from Discord never changes it.'}><i />Protected{selected.role_protected_names ? ` · ${selected.role_protected_names}` : selected.special_role_names ? ` · ${selected.special_role_names}` : ''}{selected.role_protected_names && selected.special_role_manual ? ' + by hand' : selected.role_protected_names ? ' (Discord role)' : ' (by hand)'}</span>}
-        {selected.follows_checked_at ? <span className={`status ${selected.follows_primary === 'yes' && selected.follows_secondary === 'yes' ? 'complete' : 'failed'}`} title={`Last checked ${formatDate(selected.follows_checked_at)}`}><i />{selected.follows_primary === 'yes' && selected.follows_secondary === 'yes' ? 'Follows both accounts' : `Follows ${[selected.follows_primary === 'yes' ? 'the primary' : null, selected.follows_secondary === 'yes' ? 'the secondary' : null].filter(Boolean).join(' and ') || 'neither account'}`}</span> : <span className="muted">follows not checked</span>}
-        {(selected.x_status === 'suspended' || selected.x_status === 'unavailable') && <span className="status failed"><i />X {selected.x_status}</span>}
-        <span className={`status ${selected.active ? 'complete' : 'failed'}`}><i />{selected.active ? 'Active' : 'Inactive'}</span>
-        {selected.discord_joined_at && <span className="muted">joined Discord {formatDate(selected.discord_joined_at)} ({daysAgo(selected.discord_joined_at)} days ago)</span>}
-        {selected.handle_history && <span className="muted">previous X: {selected.handle_history.split('|').map((h) => `@${h}`).join(', ')}</span>}
-      </div>
-      <div className="drawer-tools">
-        <button type="button" className={`button ${tool === 'edit' ? 'primary' : ''}`} onClick={() => (tool === 'edit' ? closeEditTool() : setTool('edit'))}><Pencil size={15} /> Edit member</button>
-        <button type="button" className={`button ${tool === 'points' ? 'primary' : ''}`} onClick={() => { if (tool === 'edit' && editDirty()) { setConfirmDiscard('tool'); return } setTool(tool === 'points' ? 'none' : 'points') }}><ArrowLeftRight size={15} /> Points</button>
-        {selected.twitter_user_id && <button type="button" className={`button ${tool === 'scan' ? 'primary' : ''}`} onClick={() => setTool(tool === 'scan' ? 'none' : 'scan')}><BadgeCheck size={15} /> Scan this member</button>}
-        <button type="button" className="button danger drawer-delete" onClick={() => { setDeleteConfirmText(''); setDeleteIgnore(true); setConfirmDelete(selected) }}><Trash2 size={15} /> Delete record</button>
-      </div>
-      {tool === 'edit' && <form className="edit-grid" ref={editForm} onSubmit={saveEdit}>
-        <label>Discord handle<input name="discord_username" defaultValue={selected.discord_username} required maxLength={120} /></label>
-        <label>X handle<input name="twitter_handle" defaultValue={selected.twitter_handle} placeholder="handle (verified on save)" /></label>
-        <label className="check-row"><input type="checkbox" name="special_role" defaultChecked={selected.special_role} /> Protected (never in the low-activity report)</label>
-        <label>Special role names<input name="special_role_names" defaultValue={selected.special_role_names} placeholder="Builder, Friend" /></label>
-        <div className="modal-actions"><button type="button" className="button ghost" onClick={closeEditTool} disabled={saving}>Cancel</button><button className="button primary" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button></div>
-      </form>}
-      {tool === 'points' && <div className="member-scan adjust-panel">
-        <div><h3 className="sub-heading"><ArrowLeftRight size={13} /> Points: add, remove or transfer</h3><p className="muted small">Manual adjustments are kept separately from scanned actions, so scans and rescoring never undo them. Every one is logged in the Audit trail with who did it and why.</p></div>
-        <HelpLink topic="points" />
-        <form className="adjust-form" onSubmit={submitAdjust}>
-          <div className="segmented adjust-mode"><button type="button" className={adjustMode === 'add' ? 'active' : ''} onClick={() => setAdjustMode('add')}>Add / remove</button><button type="button" className={adjustMode === 'transfer' ? 'active' : ''} onClick={() => setAdjustMode('transfer')}>Transfer to someone</button></div>
-          <div className={`adjust-fields ${adjustMode === 'transfer' ? 'transfer' : ''}`}>
-            <label>{adjustMode === 'transfer' ? 'Amount to move' : 'Points'}<input name="points" type="number" step="0.5" placeholder={adjustMode === 'transfer' ? 'e.g. 10' : 'e.g. 10 or -5'} required disabled={adjusting} /></label>
-            {adjustMode === 'transfer' && <label>Receiver<input name="transfer_to" placeholder="Discord handle, Discord ID or X handle" required disabled={adjusting} autoCapitalize="none" spellCheck={false} /></label>}
-            <label className="grow">Reason<input name="reason" placeholder="Shown in the audit trail and their history" maxLength={300} disabled={adjusting} /></label>
-          </div>
-          <div className="modal-actions left"><button className="button primary" disabled={adjusting}>{adjusting ? 'Saving…' : adjustMode === 'transfer' ? 'Transfer points' : adjustMode === 'add' ? 'Apply points' : 'Apply'}</button></div>
-        </form>
-        {adjustments && adjustments.length > 0 && <div className="table-wrap"><table><thead><tr><th>When</th><th>Points</th><th>Reason</th><th>By</th><th>Counterpart</th></tr></thead><tbody>{adjustments.map((a) => <tr key={a.adjustment_id}><td>{formatDate(a.created_at)}</td><td className={`score ${a.points >= 0 ? 'gain' : 'loss'}`}>{a.points >= 0 ? '+' : ''}{formatScore(a.points)}</td><td className="muted">{a.reason || '—'}</td><td className="mono">{a.actor_discord_id}</td><td className="mono">{a.counterpart_discord_id || '—'}</td></tr>)}</tbody></table></div>}
-      </div>}
-      {tool === 'scan' && selected.twitter_user_id && <div className="member-scan">
-        <div><h3 className="sub-heading">Scan this member only</h3><HelpLink topic="member-scan" label="What this scan counts" /><p className="muted small">Reads their own timeline (replies included) back to the start of the period or until the depth is reached, whichever comes first. Costs up to {formatUsd(memberDepth * 20 * 15)} ({formatCount(memberDepth * 20 * 15)} credits), usually far less because it stops at the period start. Catches replies X hides everywhere else. Pick a bigger depth for long periods on active posters.</p></div>
-        <div className="member-scan-controls"><div className="depth-picker"><span className="muted small">Latest tweets to read:</span><div className="segmented">{[100, 300, 500, 1000, 2000].map((n) => <button type="button" key={n} className={memberDepthTweets === n ? 'active' : ''} onClick={() => setMemberDepthTweets(n)} disabled={memberScanning}>{formatCount(n)}</button>)}</div><label className="depth-custom">custom<input type="number" min={20} max={5000} step={20} value={memberDepthTweets} onChange={(e) => setMemberDepthTweets(Math.min(5000, Math.max(20, Number(e.target.value) || 20)))} disabled={memberScanning} /></label></div><select value={memberPeriod} onChange={(e) => setMemberPeriod(e.target.value)} disabled={memberScanning}><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option><option value="60d">Last 60 days</option><option value="90d">Last 90 days</option><option value="180d">Last 6 months</option><option value="365d">Last 12 months</option></select><button className="button primary" onClick={runMemberScan} disabled={memberScanning}>{memberScanning ? 'Scanning…' : 'Scan this member'}</button></div>
-        {memberScan && <p className="import-summary">Read {memberScan.tweets_read} tweets{memberScan.timeline_ended_early ? ` (X's timeline feed stopped at ${memberScan.timeline_ended_at ? formatDate(memberScan.timeline_ended_at) : 'an earlier date'} after ${memberScan.timeline_read ?? 0}; search found ${memberScan.search_filled ?? 0} more back to the period start)` : ''} · matched {memberScan.matched} ({memberScan.replies} replies, {memberScan.quotes} quotes, {memberScan.mentions} mentions) · {memberScan.new_actions} new · points {formatScore(memberScan.points_before)} → <strong>{formatScore(memberScan.points_after)}</strong>{memberScan.complete ? '' : ' · depth cap reached, older tweets skipped'} · ≈ {formatCount((Math.max(memberScan.items_returned, memberScan.api_requests) * 15))} credits · saved under <a href="#scans">Scan reports</a></p>}
-      </div>}
-      <h3 className="sub-heading">Engagement this cycle · {history ? `${history.total} action${history.total === 1 ? '' : 's'}${history.total > history.items.length ? ` · showing the latest ${history.items.length}` : ''}` : '…'}</h3>
-      <p className="muted small">Every reply, quote, retweet and mention the scans matched to this member, with the points decision. Zero-point rows show why.</p>
-      {history?.items.length ? <div className="table-wrap standings-table"><table><thead><tr><th>Type</th><th>Target</th><th>Content / decision</th><th>Points</th><th>When</th><th /></tr></thead><tbody>
-        {history.items.map((item) => <tr key={item.action_key} className={item.active ? '' : 'muted-row'}><td><span className={`action-chip ${item.action_type}`}>{item.action_type}</span></td><td>@{item.target_handle}</td><td className="decision"><strong>{item.text || 'Native retweet'}</strong><small>{item.reason}{!item.active ? ' · no longer public' : ''}</small></td><td className={`score ${item.points > 0 ? 'gain' : ''}`}>{formatScore(item.points)}</td><td>{formatDate(item.occurred_at)}</td><td>{item.action_url && <a className="icon-button" href={item.action_url} target="_blank" title="Open on X"><ExternalLink size={15} /></a>}</td></tr>)}
-      </tbody></table></div> : history ? <p className="muted small">No matched actions in this cycle. If they did interact, check the X handle above is the account they used, then run a scan that covers the date.</p> : null}
-    </div></div>}
 
     {followPlan && <div className="modal-backdrop" onMouseDown={() => { if (!followBusy) setFollowPlan(undefined) }}><div className="modal" onMouseDown={(e) => e.stopPropagation()}>
       <div className="modal-icon"><UserRoundSearch /></div><h2>Check who follows the tracked accounts</h2><HelpLink topic="follows" />
@@ -716,21 +524,6 @@ export default function MembersPage({ session }: { session: Session }) {
       {followResult.unknown > 0 && <p className="estimate-warning">{followResult.unknown} member{followResult.unknown === 1 ? ' was' : 's were'} left unchecked because a follower list could not be read to the end. They are not counted as non-followers.</p>}
       <p className="muted small">Use the <strong>Not following</strong> filter to see everyone proven to be missing at least one follow.</p>
       <div className="modal-actions"><button className="button ghost" onClick={() => setFollowResult(undefined)}>Close</button><button className="button primary" onClick={() => { setFollowResult(undefined); resetPage(setFollows)('missing') }}>Show who is not following</button></div>
-    </div></div>}
-
-    {confirmDelete && <div className="modal-backdrop stacked" onMouseDown={() => { if (!deleting) setConfirmDelete(undefined) }}><div className="modal" onMouseDown={(e) => e.stopPropagation()}>
-      <div className="modal-icon danger-icon"><Trash2 /></div><h2>Delete {confirmDelete.discord_username} for good?</h2><HelpLink topic="members" label="Deactivating and deleting" />
-      <p>This erases the record itself, not just their standing. Gone for good: <strong>{formatScore(confirmDelete.score)} points</strong>, every scored action behind them, and every manual adjustment. Frozen leaderboards from closed cycles keep their copy, and so does the Audit trail, so past cycles still add up. Nothing happens to their Discord account.</p>
-      <p className="muted small">To park somebody instead, keeping their history and points so you can bring them back, close this and use Deactivate.</p>
-      <label className="check-row"><input type="checkbox" checked={deleteIgnore} onChange={(e) => setDeleteIgnore(e.target.checked)} disabled={deleting} /> Never let Sync from Discord add them back{selected?.active ? ' (they are still in the server, so leave this on)' : ''}</label>
-      <label>Type DELETE to confirm<input autoFocus value={deleteConfirmText} onChange={(e) => setDeleteConfirmText(e.target.value)} placeholder="DELETE" disabled={deleting} /></label>
-      <div className="modal-actions"><button className="button ghost" onClick={() => setConfirmDelete(undefined)} disabled={deleting}>Cancel</button><button className="button danger" disabled={deleting || deleteConfirmText.trim().toUpperCase() !== 'DELETE'} onClick={() => void removeMember(confirmDelete)}>{deleting ? 'Deleting…' : 'Delete this record'}</button></div>
-    </div></div>}
-
-    {confirmDeactivate && <div className="modal-backdrop" onMouseDown={() => setConfirmDeactivate(undefined)}><div className="modal" onMouseDown={(e) => e.stopPropagation()}>
-      <div className="modal-icon"><UserRoundX /></div><h2>Deactivate {confirmDeactivate.discord_username}?</h2>
-      <p>They drop out of the leaderboard, the low-activity report and every scan. Their history and points are kept, and you can reactivate them at any time.</p>
-      <div className="modal-actions"><button className="button ghost" onClick={() => setConfirmDeactivate(undefined)}>Cancel</button><button className="button danger" onClick={() => { const user = confirmDeactivate; setConfirmDeactivate(undefined); void patch(user, { active: false }, `${user.discord_username} deactivated.`) }}>Deactivate</button></div>
     </div></div>}
 
     {showRoles && <div className="modal-backdrop" onMouseDown={() => { if (!roleBusy) setShowRoles(false) }}><div className="modal modal-wide" onMouseDown={(e) => e.stopPropagation()}>
@@ -799,7 +592,7 @@ export default function MembersPage({ session }: { session: Session }) {
       {syncResult.partial_list_guard && <p className="estimate-warning">Discord served far fewer members than the registry holds, which usually means the member list was cut short. <strong>Nobody was deactivated.</strong> Run the sync again in a minute; if it keeps happening, check the bot's Server Members Intent.</p>}
       {syncResult.deactivated.length > 0 && <><h3 className="sub-heading">Left the server, now marked inactive</h3><p className="group-note">They are out of the leaderboard, the low-activity report and future scans. Their points and history are kept, so reactivating them puts everything back. Nothing happened to their Discord account.</p><div className="table-wrap import-results"><table><tbody>{syncResult.deactivated.map((row) => <tr key={row.discord_user_id}><td><span className="member-cell"><strong>{row.discord_username}</strong><small className="mono">{row.discord_user_id}</small></span></td></tr>)}</tbody></table></div></>}
       {syncResult.left_server.length > 0 && !syncResult.deactivated.length && <><h3 className="sub-heading">In the registry but not in the server</h3><div className="table-wrap import-results"><table><tbody>{syncResult.left_server.map((row) => <tr key={row.discord_user_id}><td><span className="member-cell"><strong>{row.discord_username}</strong><small className="mono">{row.discord_user_id}</small></span></td></tr>)}</tbody></table></div></>}
-      {syncResult.back_in_server.length > 0 && <><h3 className="sub-heading">Back in the server, still marked inactive</h3><p className="group-note">Left alone on purpose, in case you deactivated them yourself. Open anyone here and reactivate them to put them back on the leaderboard.</p><div className="table-wrap import-results"><table><tbody>{syncResult.back_in_server.map((row) => <tr key={row.discord_user_id}><td><a className="member-cell linked-cell" href={`#members?search=${row.discord_user_id}&open=${row.discord_user_id}`} onClick={() => setSyncResult(undefined)}><strong>{row.discord_username}</strong><small className="mono">{row.discord_user_id}</small></a></td></tr>)}</tbody></table></div></>}
+      {syncResult.back_in_server.length > 0 && <><h3 className="sub-heading">Back in the server, still marked inactive</h3><p className="group-note">Left alone on purpose, in case you deactivated them yourself. Open anyone here and reactivate them to put them back on the leaderboard.</p><div className="table-wrap import-results"><table><tbody>{syncResult.back_in_server.map((row) => <tr key={row.discord_user_id}><td><a className="member-cell linked-cell" href={`#member?id=${row.discord_user_id}`} onClick={() => setSyncResult(undefined)}><strong>{row.discord_username}</strong><small className="mono">{row.discord_user_id}</small></a></td></tr>)}</tbody></table></div></>}
       <div className="modal-actions"><button className="button primary" onClick={() => setSyncResult(undefined)}>Done</button></div>
     </div></div>}
   </div>
