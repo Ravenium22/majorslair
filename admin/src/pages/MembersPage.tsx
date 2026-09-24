@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react'
 import { AlertTriangle, ArrowLeftRight, BadgeCheck, Download, ExternalLink, FileUp, Pencil, Plus, RefreshCw, Search, Shield, ShieldCheck, ShieldOff, Tags, Trash2, UserRoundCheck, UserRoundSearch, UserRoundX, X } from 'lucide-react'
 import useSWR from 'swr'
-import { api, formatCount, formatDate, formatScore, formatUsd, mutateApi } from '../api'
+import { api, formatCount, formatDate, formatDay, formatScore, formatUsd, mutateApi } from '../api'
 import { Empty, HelpLink, Loading, PageHeader, Pagination, RoleExclusionPicker, SortTh, Toast, ToolsMenu, useConfirm, useEscape } from '../components'
 import { parseCsv, rowsFromSheet, type ImportRow } from '../csv'
 import type { Action, Adjustment, DiscordRole, DiscordSyncResponse, FollowCheckResult, FollowEstimate, ImportResponse, ImportStatus, LinkedUser, MemberScanResult, Paginated, RoleBulkResult, Session, VerifyResponse } from '../types'
@@ -593,7 +593,6 @@ export default function MembersPage({ session }: { session: Session }) {
         {VIEWS.map((view) => <button key={view.id} type="button" className={`view-pill ${activeView?.id === view.id ? 'active' : ''}`} aria-pressed={activeView?.id === view.id} title={view.hint} onClick={() => applyView(view)}>{view.label}</button>)}
         {!activeView && <span className="view-pill custom active" aria-live="polite">Custom filter</span>}
         {activeView && <button type="button" className={`link-button more-filters ${filtersOpen ? 'open' : ''}`} aria-expanded={filtersOpen} aria-controls="member-filters" onClick={() => setShowFilters(!filtersOpen)}>{filtersOpen ? 'Fewer filters' : 'More filters'}{extraFilters && !filtersOpen ? ` (${extraFilters})` : ''}</button>}
-        <a className="link-button purge-link" href="#low-activity">Purge list on the low-activity report</a>
         {!filtersOpen && <span className="filter-count">{data ? `${formatCount(data.total)} member${data.total === 1 ? '' : 's'}` : ''}</span>}
       </div>
       {filtersOpen && <div className="toolbar filters wrap" id="member-filters">
@@ -607,7 +606,7 @@ export default function MembersPage({ session }: { session: Session }) {
         <div className="segmented">{['active', 'inactive', 'all'].map((value) => <button className={filter === value ? 'active' : ''} aria-pressed={filter === value} onClick={() => resetPage(setFilter)(value)} key={value}>{value === 'active' ? 'Active' : value === 'inactive' ? 'Inactive' : 'All'}</button>)}</div>
         <span className="filter-count">{data ? `${formatCount(data.total)} member${data.total === 1 ? '' : 's'}` : ''}{hasFilters && <button className="link-button" onClick={clearFilters}>Clear filters</button>}</span>
       </div>}
-      <div className="table-wrap"><table><thead><tr>
+      <div className="table-wrap"><table className="members-table"><thead><tr>
         <th className="pick-cell"><label className="pick-box"><input type="checkbox" aria-label="Select every member on this page" checked={Boolean(data?.items.length) && (data?.items ?? []).every((u) => picked.includes(u.discord_user_id))} onChange={(e) => { const ids = (data?.items ?? []).map((u) => u.discord_user_id); setPicked(e.target.checked ? [...new Set([...picked, ...ids])] : picked.filter((id) => !ids.includes(id))) }} /></label></th>
         <SortTh label="Discord" direction={sort === 'name' ? 'asc' : undefined} onToggle={() => resetPage(setSort)('name')} />
         <th>X identity</th>
@@ -615,20 +614,19 @@ export default function MembersPage({ session }: { session: Session }) {
         <SortTh label="Points" className="score" direction={sort === 'score_desc' ? 'desc' : sort === 'score_asc' ? 'asc' : undefined} onToggle={() => resetPage(setSort)(sort === 'score_desc' ? 'score_asc' : 'score_desc')} />
         <SortTh label="Last signal" direction={sort === 'last_signal' ? 'desc' : undefined} onToggle={() => resetPage(setSort)('last_signal')} />
         <SortTh label="Joined Discord" direction={sort === 'joined' ? 'desc' : undefined} onToggle={() => resetPage(setSort)('joined')} />
-        <th>Status</th><th className="row-actions-head" aria-label="Actions" />
+        <th className="row-actions-head" aria-label="Actions" />
       </tr></thead><tbody>
         {/* The row stays clickable for the mouse, but the keyboard and screen readers get a
             single real link in the name cell. A row that was itself a button, wrapping a
             link and three icon buttons, was invalid nesting and roughly 125 tab stops. */}
         {data?.items.map((user) => <tr key={user.discord_user_id} className={`member-row ${picked.includes(user.discord_user_id) ? 'picked' : ''}`} onClick={() => openMember(user)}>
           <td className="pick-cell" onClick={(e) => e.stopPropagation()}><label className="pick-box"><input type="checkbox" checked={picked.includes(user.discord_user_id)} aria-label={`Select ${user.discord_username}`} onChange={(e) => setPicked(e.target.checked ? [...picked, user.discord_user_id] : picked.filter((id) => id !== user.discord_user_id))} /></label></td>
-          <td><button type="button" className="member-cell linked-cell" onClick={(e) => { e.stopPropagation(); openMember(user) }}><strong>{user.discord_username}</strong><small className="mono">{user.discord_user_id}</small></button></td>
+          <td><button type="button" className="member-cell linked-cell" onClick={(e) => { e.stopPropagation(); openMember(user) }}><strong>{user.discord_username}{!user.active && <span className="status failed inline-status"><i />Inactive</span>}</strong><small className="mono">{user.discord_user_id}</small></button></td>
           <td>{user.twitter_user_id ? <span className="protected-cell"><a href={`https://x.com/${user.twitter_handle}`} target="_blank" rel="noreferrer">@{user.twitter_handle}</a>{(user.x_status === 'suspended' || user.x_status === 'unavailable') && <span className="status failed"><i />X {user.x_status}</span>}{user.follows_primary === 'yes' && user.follows_secondary === 'yes' ? <small className="follow-ok">follows both</small> : user.follows_primary === 'no' || user.follows_secondary === 'no' ? <small className="follow-missing" title={user.follows_primary === 'no' && user.follows_secondary === 'no' ? 'Follows neither tracked account' : user.follows_primary === 'no' ? 'Does not follow the primary account' : 'Does not follow the secondary account'}>{user.follows_primary === 'no' && user.follows_secondary === 'no' ? 'follows neither' : 'missing a follow'}</small> : null}</span> : <span className="muted">Not linked</span>}</td>
           <td>{user.special_role ? <span className="protected-cell"><span className="status complete"><i />Protected</span><small title={user.role_protected_names ? 'Granted by a Discord role. Removing the role in Discord removes this at the next sync.' : 'Set here by hand. Sync never changes it.'}>{user.role_protected_names ? `role: ${user.role_protected_names}` : `by hand${user.special_role_names ? `: ${user.special_role_names}` : ''}`}</small></span> : <span className="muted">—</span>}</td>
           <td className="score">{formatScore(user.score)}</td>
-          <td>{formatDate(user.last_active_at)}</td>
-          <td>{user.discord_joined_at ? <span className="protected-cell">{formatDate(user.discord_joined_at)}<small>{daysAgo(user.discord_joined_at)} days ago</small></span> : <span className="muted" title="Run Sync from Discord to fill join dates">—</span>}</td>
-          <td><span className={`status ${user.active ? 'complete' : 'failed'}`}><i />{user.active ? 'Active' : 'Inactive'}</span></td>
+          <td title={user.last_active_at ? formatDate(user.last_active_at) : undefined}>{formatDay(user.last_active_at)}</td>
+          <td>{user.discord_joined_at ? <span className="protected-cell">{formatDay(user.discord_joined_at)}<small>{daysAgo(user.discord_joined_at)} days ago</small></span> : <span className="muted" title="Run Sync from Discord to fill join dates">—</span>}</td>
           <td className="row-actions" onClick={(e) => e.stopPropagation()}>
             <button className="icon-button" title="Edit this member" aria-label={`Edit ${user.discord_username}`} onClick={() => { openMember(user); setTool('edit') }}><Pencil size={17} /></button>
             {/* Shield and ShieldOff differ by one diagonal stroke, and one of these buttons
@@ -651,7 +649,6 @@ export default function MembersPage({ session }: { session: Session }) {
 
     {selected && <div className="modal-backdrop" onMouseDown={closeMember}><div className="modal modal-wide member-drawer" onMouseDown={(e) => e.stopPropagation()}>
       <button className="icon-button drawer-close" onClick={closeMember} aria-label="Close"><X size={18} /></button>
-      <p className="eyebrow">Member</p>
       <h2>{selected.discord_username} <small className="mono">{selected.discord_user_id}</small></h2>
       <div className="member-facts">
         <span>{selected.twitter_user_id ? <a href={`https://x.com/${selected.twitter_handle}`} target="_blank">@{selected.twitter_handle}</a> : <em className="muted">no X linked</em>}</span>
@@ -681,10 +678,10 @@ export default function MembersPage({ session }: { session: Session }) {
         <HelpLink topic="points" />
         <form className="adjust-form" onSubmit={submitAdjust}>
           <div className="segmented adjust-mode"><button type="button" className={adjustMode === 'add' ? 'active' : ''} onClick={() => setAdjustMode('add')}>Add / remove</button><button type="button" className={adjustMode === 'transfer' ? 'active' : ''} onClick={() => setAdjustMode('transfer')}>Transfer to someone</button></div>
-          <div className="adjust-fields">
-            <label>{adjustMode === 'transfer' ? 'Amount to move' : 'Points'}<input name="points" type="number" step="0.5" placeholder={adjustMode === 'transfer' ? '10' : '10 to add, -5 to remove'} required disabled={adjusting} /></label>
+          <div className={`adjust-fields ${adjustMode === 'transfer' ? 'transfer' : ''}`}>
+            <label>{adjustMode === 'transfer' ? 'Amount to move' : 'Points'}<input name="points" type="number" step="0.5" placeholder={adjustMode === 'transfer' ? 'e.g. 10' : 'e.g. 10 or -5'} required disabled={adjusting} /></label>
             {adjustMode === 'transfer' && <label>Receiver<input name="transfer_to" placeholder="Discord handle, Discord ID or X handle" required disabled={adjusting} autoCapitalize="none" spellCheck={false} /></label>}
-            <label className="grow">Reason<input name="reason" placeholder="Shown in the audit trail and the member's history" maxLength={300} disabled={adjusting} /></label>
+            <label className="grow">Reason<input name="reason" placeholder="Shown in the audit trail and their history" maxLength={300} disabled={adjusting} /></label>
           </div>
           <div className="modal-actions left"><button className="button primary" disabled={adjusting}>{adjusting ? 'Saving…' : adjustMode === 'transfer' ? 'Transfer points' : adjustMode === 'add' ? 'Apply points' : 'Apply'}</button></div>
         </form>
@@ -706,7 +703,7 @@ export default function MembersPage({ session }: { session: Session }) {
       <div className="modal-icon"><UserRoundSearch /></div><h2>Check who follows the tracked accounts</h2><HelpLink topic="follows" />
       <p>This reads the follower list of each tracked account once and matches your {followPlan.linked_members} linked members against it. That is far cheaper than asking about each member, and it is the only way to be sure.</p>
       <dl className="estimate-grid" data-dialog-focus tabIndex={-1} aria-live="polite">
-        {followPlan.accounts.map((account) => <div key={account.slot}><dt>@{account.handle}</dt><dd>{account.error ? '—' : formatCount(account.followers ?? 0)}<small>{account.error ? account.error : 'followers to read'}</small></dd></div>)}
+        {followPlan.accounts.map((account) => <div key={account.slot}><dt className="handle">@{account.handle}</dt><dd>{account.error ? '—' : formatCount(account.followers ?? 0)}<small>{account.error ? account.error : 'followers to read'}</small></dd></div>)}
         <div className="wide cost-cell"><dt>This check will cost about</dt><dd>{formatUsd(followPlan.credits)}<small>{formatCount(followPlan.credits)} credits · one per follower read</small></dd></div>
       </dl>
       <p className="field-hint">A member is only recorded as not following when the whole follower list was read. If a list is too long to finish, they stay marked unchecked rather than being blamed for it.</p>
@@ -754,13 +751,13 @@ export default function MembersPage({ session }: { session: Session }) {
       <div className="modal-actions"><button type="button" className="button ghost" onClick={() => setShowRoles(false)} disabled={roleBusy}>{roleResult ? 'Done' : 'Cancel'}</button>{!roleResult && <button type="button" className="button" onClick={previewRoles} disabled={roleBusy}>{roleBusy ? 'Working…' : 'Preview who matches'}</button>}{!roleResult && <button type="button" className="button primary" onClick={applyRoles} disabled={roleBusy || !roleId || !rolePreview} title={!rolePreview ? 'Run the preview first so you can see exactly who this hits' : undefined}>{roleBusy ? 'Working…' : !rolePreview ? (roleAction === 'add' ? 'Give the role' : 'Remove the role') : roleAction === 'add' ? `Give the role to ${rolePreview.matched} members` : `Remove the role from ${rolePreview.matched} members`}</button>}</div>
     </div></div>}
 
-    {showLink && <div className="modal-backdrop" onMouseDown={() => setShowLink(false)}><form className="modal" onSubmit={link} onMouseDown={(e) => e.stopPropagation()}><div className="modal-icon"><ShieldCheck /></div><h2>Link a member</h2><p>Use the Discord username (the handle shown in the profile, not the nickname). The X handle is resolved through twitterapi.io and its stable account ID is stored.</p><label>Discord user ID<input required name="discord_user_id" pattern="\d+" inputMode="numeric" placeholder="123456789012345678" disabled={linking} /><small className="field-hint">Discord → User Settings → Advanced → Developer Mode on, then right-click the member → Copy User ID.</small></label><label>Discord handle<input required name="discord_username" placeholder="luna.luna12" autoCapitalize="none" spellCheck={false} disabled={linking} /></label><label>X handle<input required name="twitter_handle" placeholder="@handle" autoCapitalize="none" spellCheck={false} disabled={linking} /></label><div className="modal-actions"><button type="button" className="button ghost" onClick={() => setShowLink(false)} disabled={linking}>Cancel</button><button className="button primary" disabled={linking}>{linking ? 'Verifying on X…' : 'Verify & link'}</button></div></form></div>}
+    {showLink && <div className="modal-backdrop" onMouseDown={() => setShowLink(false)}><form className="modal" onSubmit={link} onMouseDown={(e) => e.stopPropagation()}><div className="modal-icon"><ShieldCheck /></div><h2>Link a member</h2><p>Use the Discord username (the handle shown in the profile, not the nickname). The X handle is resolved through twitterapi.io and its stable account ID is stored.</p><label>Discord user ID<input required name="discord_user_id" pattern="\d+" inputMode="numeric" placeholder="e.g. 123456789012345678" disabled={linking} /><small className="field-hint">Discord → User Settings → Advanced → Developer Mode on, then right-click the member → Copy User ID.</small></label><label>Discord handle<input required name="discord_username" placeholder="e.g. luna.luna12" autoCapitalize="none" spellCheck={false} disabled={linking} /></label><label>X handle<input required name="twitter_handle" placeholder="e.g. @handle" autoCapitalize="none" spellCheck={false} disabled={linking} /></label><div className="modal-actions"><button type="button" className="button ghost" onClick={() => setShowLink(false)} disabled={linking}>Cancel</button><button className="button primary" disabled={linking}>{linking ? 'Verifying on X…' : 'Verify & link'}</button></div></form></div>}
 
     {showImport && <div className="modal-backdrop" onMouseDown={closeImport}><div className="modal modal-wide" onMouseDown={(e) => e.stopPropagation()}>
       <div className="modal-icon"><FileUp /></div><h2>Import members from a spreadsheet</h2>
       {!importResult && <>
         <p>Export the sheet as CSV. The first row must contain a <code>discord_id</code> column. Optional columns: <code>discord_username</code> (the Discord handle), <code>x_handle</code>, <code>SPECIAL ROLE</code> (YES/NO) and <code>SPECIAL ROLE NAMES</code>. Everyone in the sheet is registered; handles are verified through twitterapi.io (about 18 credits each) and members already linked to the same handle are left untouched. Re-importing is safe.</p>
-        <label>CSV file<input type="file" accept=".csv,text/csv" onChange={pickFile} disabled={importing} /></label>
+        <label className="file-pick"><span className="file-pick-label">CSV file</span><input type="file" accept=".csv,text/csv" onChange={pickFile} disabled={importing} /><span className="button file-pick-button"><FileUp size={16} /> Choose a CSV file</span><span className="file-pick-name">{importName || 'No file chosen yet'}</span></label>
         {importRows.length > 0 && <p className="import-summary"><strong>{importName}</strong>: {importRows.length} members found · {withHandles} with an X handle · {importRows.length - withHandles} without one (registered anyway) · {withSpecial} marked as special role.</p>}
         <div className="modal-actions"><button type="button" className="button ghost" onClick={closeImport} disabled={importing}>Cancel</button><button className="button primary" onClick={runImport} disabled={!importRows.length || importing}>{importing ? 'Verifying handles…' : `Import ${importRows.length || ''}`}</button></div>
       </>}

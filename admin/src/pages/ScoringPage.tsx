@@ -61,9 +61,9 @@ export default function ScoringPage({ session }: { session: Session }) {
       <section className="danger-zone"><div><h2>Starting a new cycle</h2><p>Resetting the leaderboard now lives with the rest of the monthly round, on the Overview page.</p></div><a className="button" href="#overview">Go to Overview</a></section>
     </div></div>
     {showSave && <div className="modal-backdrop" onMouseDown={() => { if (!saving) setShowSave(false) }}><div className="modal modal-wide" onMouseDown={(e) => e.stopPropagation()}>
-      <div className="modal-icon"><Save /></div><h2>Save these {changes.length} change{changes.length === 1 ? '' : 's'}?</h2>
+      <div className="modal-icon"><Save /></div><h2>{changes.length === 1 ? 'Save this change?' : `Save these ${changes.length} changes?`}</h2>
       <p>Every action in the current cycle is scored again with the new rules, so points can move up or down straight away. Past snapshots and scan reports are untouched.</p>
-      <div className="save-diff"><table><tbody>{changes.map((c) => <tr key={c.key}><td><strong>{c.key.replaceAll('_', ' ')}</strong></td><td className="from">{c.from || '(empty)'}</td><td className="to">{c.to || '(empty)'}</td></tr>)}</tbody></table></div>
+      <div className="save-diff"><table><thead><tr><th>Rule</th><th>Now</th><th>Becomes</th></tr></thead><tbody>{changes.map((c) => <tr key={c.key}><td><strong>{c.key.replaceAll('_', ' ')}</strong></td><td className="from">{c.from || '(empty)'}</td><td className="to">{c.to || '(empty)'}</td></tr>)}</tbody></table></div>
       <div className="modal-actions"><button className="button ghost" onClick={() => setShowSave(false)} disabled={saving}>Keep editing</button><button className="button primary" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save and rescore'}</button></div>
     </div></div>}
 

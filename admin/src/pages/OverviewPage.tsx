@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Activity, AlertTriangle, ArrowUpRight, Bot, Check, Clock3, LoaderCircle, Play, Radar, RotateCcw, Trophy, Users } from 'lucide-react'
+import { Activity, AlertTriangle, ArrowUpRight, Check, Clock3, LoaderCircle, Play, Radar, RotateCcw, Trophy, Users } from 'lucide-react'
 import useSWR from 'swr'
 import { api, formatCount, formatDate, formatScore, formatUsd, mutateApi } from '../api'
 import { Empty, HelpLink, PageHeader, Status, Toast, useEscape } from '../components'
@@ -171,7 +171,7 @@ export default function OverviewPage({ session }: { session: Session }) {
           <ol className="cycle-steps">
             <li className={scannedThisCycle ? 'done' : ''}>Scan the window {scannedThisCycle && <small>done {formatDate(lastScan?.started_at)}</small>}</li>
             <li className={scannedThisCycle ? 'done' : ''}>Check what moved <a href="#scans">Scan reports</a></li>
-            <li>Review who is inactive, then mark them {lowActivity && <small>{lowActivity.items.length} on the list</small>}<a href="#low-activity">Low-activity report</a></li>
+            <li>Review and mark who is inactive {lowActivity && <small>{lowActivity.items.length} on the list</small>}<a href="#low-activity">Low-activity report</a></li>
             <li>Reward the top <a href="#members">Give role</a></li>
             <li>Start the next cycle {cycleDays !== null && cycleDays >= 28 && <small>due</small>}<button className="link-button" onClick={() => setShowReset(true)}>Reset the leaderboard</button></li>
           </ol>
@@ -236,7 +236,7 @@ export default function OverviewPage({ session }: { session: Session }) {
         <div className="modal-actions"><button className="button ghost" onClick={() => setShowReset(false)} disabled={resetting}>Cancel</button><button className="button danger" disabled={confirmation !== 'RESET LEADERBOARD' || resetting} onClick={reset}><RotateCcw size={16} /> {resetting ? 'Freezing…' : 'Freeze and start a new cycle'}</button></div>
       </div></div>}
       <section className="panel scan-history">
-        <div className="panel-head"><div><h2>Recent scans</h2></div><Bot size={21} /></div>
+        <div className="panel-head"><div><h2>Recent scans</h2></div><a href="#scans">All scan reports <ArrowUpRight size={15} /></a></div>
         <div className="table-wrap"><table><thead><tr><th>Status</th><th>Window</th><th>Source</th><th>Started</th><th>Matched</th><th>X issues</th><th>Requests</th></tr></thead><tbody>
           {data?.recent_scans.map((item) => <tr key={item.scan_id}><td><Status state={item.status} /></td><td className="mono">{item.period}</td><td>{item.source}</td><td>{formatDate(item.started_at)}</td><td>{String(item.summary?.discovered ?? '—')}</td><td>{Array.isArray(item.summary?.x_unavailable) ? (item.summary.x_unavailable.length ? <a href="#members?view=xissues" className="issue-link">{item.summary.x_unavailable.length} suspended</a> : '0') : '—'}</td><td>{String(item.summary?.api_requests ?? '—')}</td></tr>)}
         </tbody></table></div>

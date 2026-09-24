@@ -61,7 +61,7 @@ export default function ActivityPage({ session }: { session: Session }) {
       <div className="modal-icon"><Stethoscope /></div><h2>Why isn't this tweet counted?</h2><HelpLink topic="diagnose" label="The reasons it can give" />
       <p>Paste the URL of a reply, quote or post. The bot checks whether the author is linked, whether the tweet is already in the log, what it would score today, and whether X actually shows it in the parent's reply list and in search. Costs a few credits.</p>
       <form onSubmit={diagnose} className="diagnose-form">
-        <input name="url" placeholder="https://x.com/user/status/123456789" required autoFocus disabled={diagnosing} />
+        <input name="url" placeholder="e.g. https://x.com/user/status/123456789" required autoFocus disabled={diagnosing} />
         <button className="button primary" disabled={diagnosing}>{diagnosing ? 'Checking…' : 'Check'}</button>
       </form>
       {diagnosis && <div className="diagnosis">

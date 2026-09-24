@@ -115,7 +115,7 @@ td a { font-weight: 600; }.scan-history { margin-bottom: 22px; }
 .icon-button { width: 34px; height: 34px; display: inline-grid; place-items: center; border: 1px solid var(--line-soft); border-radius: 2px; color: var(--muted); background: transparent; cursor: pointer; }.icon-button:hover { color: var(--amber); border-color: #6e572e; }
 .pagination { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-top: 1px solid var(--line-soft); color: var(--muted-2); font: 10px "Cascadia Mono", monospace; }.pagination > div { display: flex; align-items: center; gap: 12px; }.pagination button { padding: 6px 9px; border: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer; }.pagination button:disabled { opacity: .35; cursor: default; }
 .empty { grid-column: 1 / -1; padding: 50px 24px; text-align: center; color: var(--muted); }.empty svg { color: var(--amber); margin-bottom: 10px; }.empty strong { display: block; color: var(--text); }.empty p { margin: 7px auto 0; max-width: 440px; font-size: 12px; line-height: 1.5; }
-.posts-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }.post-card { padding: 20px; border: 1px solid var(--line); background: var(--surface); }.post-card.inactive { opacity: .6; }.post-top { display: flex; justify-content: space-between; }.x-mark { width: 32px; height: 32px; display: grid; place-items: center; background: var(--text); color: #080909; font-size: 18px; }.post-card h3 { margin: 6px 0 22px; font: 500 18px Bahnschrift, sans-serif; }.post-card dl { margin: 0; }.post-card dl div { display: flex; justify-content: space-between; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line-soft); font-size: 11px; }.post-card dt { color: var(--muted); }.post-card dd { margin: 0; text-align: right; }.post-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 15px; }.post-actions a { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; }.span-all { grid-column: 1 / -1; }
+.posts-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }.post-card { padding: 20px; border: 1px solid var(--line); background: var(--surface); }.post-card.inactive { opacity: .6; }.post-top { display: flex; justify-content: space-between; }.post-card h3 { margin: 6px 0 22px; font: 500 18px Bahnschrift, sans-serif; }.post-card dl { margin: 0; }.post-card dl div { display: flex; justify-content: space-between; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line-soft); font-size: 11px; }.post-card dt { color: var(--muted); }.post-card dd { margin: 0; text-align: right; }.post-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 15px; }.post-actions a { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; }.span-all { grid-column: 1 / -1; }
 .callout { display: flex; gap: 13px; padding: 15px 17px; margin-bottom: 20px; color: #d8c49e; border: 1px solid #554628; background: #19160f; }.callout svg { flex: 0 0 auto; color: var(--amber); }.callout strong { font-size: 12px; }.callout p { margin: 4px 0 0; color: #91846c; font-size: 11px; }
 .config-layout { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 20px; align-items: start; }.config-index { position: sticky; top: 20px; display: flex; flex-direction: column; padding: 18px; border: 1px solid var(--line); background: var(--surface); }.config-index svg { color: var(--amber); margin-bottom: 13px; }.config-index strong { margin-bottom: 12px; font-size: 12px; }.config-index a { padding: 7px 0; color: var(--muted); font-size: 11px; }.config-index a:hover { color: var(--teal); }.config-groups { display: grid; gap: 18px; }.config-group { scroll-margin-top: 20px; }.config-group .panel-head > span { color: var(--muted-2); font: 9px "Cascadia Mono", monospace; }.field-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; padding: 3px 22px 24px; }.config-group label.wide { grid-column: 1 / -1; }.config-group label > span { color: #c2c9c5; }.config-group label small { display: block; margin-top: 7px; color: var(--muted-2); font-size: 10px; line-height: 1.45; text-transform: none; letter-spacing: 0; }.danger-zone { display: flex; justify-content: space-between; align-items: center; gap: 24px; padding: 23px; border: 1px solid #5e302d; background: #180f0e; }.danger-zone h2 { margin: 0; font: 500 20px Bahnschrift, sans-serif; }.danger-zone p:last-child { margin: 7px 0 0; color: #b08a85; font-size: 11px; }.danger-zone .eyebrow { color: var(--red); }
 .action-chip { display: inline-flex; padding: 4px 7px; border: 1px solid #3b4541; color: #aab5b0; background: #161a19; font: 8px "Cascadia Mono", monospace; letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }.action-chip.reply { border-color: #375c56; color: var(--teal); }.action-chip.quote { border-color: #6e572e; color: var(--amber); }.action-chip.retweet { border-color: #3f624d; color: var(--green); }.action-chip.mention { border-color: #55526f; color: #aaa6d8; }
@@ -484,3 +484,79 @@ th.sortable { padding: 0; }
 .help-section code { padding: 1px 6px; border: 1px solid var(--line-soft); background: #0c0f0f; font-size: 13px; }
 .help-section.flash { border-color: var(--teal); }
 @media (max-width: 900px) { .help-layout { grid-template-columns: 1fr; } .help-index { position: static; } }
+
+/* ---- Polish pass: alignment across every page, drawer and dialog ---- */
+
+/* Header actions sat right after the description on pages with a short one, because the
+   header row was only as wide as its text. It now spans the page, so the buttons always
+   end on the right edge, level with the last line of the description. */
+.page-header > .page-header-main { flex: 1 1 auto; min-width: 0; }
+
+/* The member drawer holds the evidence a decision is defended with; at 860px its history
+   table scrolled sideways and cut the dates off. */
+.modal.modal-wide.member-drawer { width: min(1120px, 100%); }
+
+/* Points form: two fields when adding, three when transferring, no dead column. */
+.adjust-fields { grid-template-columns: 170px minmax(0, 1fr); }
+.adjust-fields.transfer { grid-template-columns: 170px minmax(0, 1fr) minmax(0, 1.3fr); }
+
+/* One height for everything on a control row: segmented choices, the custom box, the
+   window picker. The segmented frame adds 8px around its buttons, so they are 26px. */
+.member-scan-controls, .depth-row { align-items: center; }
+.member-scan-controls .segmented button, .depth-row .segmented button { min-height: 26px; padding: 3px 11px; }
+.member-scan-controls select, .depth-row select, .depth-custom input { height: 34px; min-height: 34px; box-sizing: border-box; }
+.depth-custom { align-self: center; }
+
+/* Placeholders are examples, and now look like it next to real values. */
+input::placeholder, textarea::placeholder { color: var(--muted-2); }
+
+/* A themed file picker instead of the browser's own, which follows the browser language. */
+.file-pick { position: relative; display: flex !important; flex-wrap: wrap; align-items: center; gap: 12px; }
+.file-pick-label { flex: 0 0 100%; }
+.file-pick input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.file-pick-button { min-height: 38px; text-transform: none; letter-spacing: 0; font-size: 13px; cursor: pointer; }
+.file-pick:focus-within .file-pick-button { outline: 2px solid var(--teal); outline-offset: 2px; }
+.file-pick-name { color: var(--muted); font-size: 13px; font-weight: 400; text-transform: none; letter-spacing: 0; }
+
+/* Handles keep their own spelling; small-caps styling turned @m_m3l into @M_M3L. */
+.handle, .estimate-grid dt.handle { text-transform: none; letter-spacing: 0; font-size: 12px; }
+
+/* Row actions: one size for the icon buttons and the labelled protection toggle. */
+.row-actions .icon-button { width: 34px; height: 34px; }
+.row-actions .icon-button.labelled { width: auto; }
+.inline-status { margin-left: 8px; font-weight: 400; vertical-align: 1px; }
+
+/* Stat captions are sentences: set them as text and let them wrap instead of cutting off. */
+.metric > small { font-family: inherit; white-space: normal; overflow: visible; text-overflow: clip; line-height: 1.45; }
+
+/* The monthly round: every step's link or button ends on the same right edge. */
+.cycle-steps li .link-button { margin-left: auto; font-size: 12px; }
+
+/* Post cards: the account and its tracking state on one line, the date as the heading. */
+.post-top { align-items: center; }
+.post-handle { margin: 0; color: var(--amber); font-size: 13px; font-weight: 600; }
+.post-card h3 { margin-top: 10px; }
+
+/* Lists on a phone wrap into rows from the left instead of stacking one per line. */
+@media (max-width: 760px) {
+  .toolbar.views { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: flex-start; }
+  .toolbar.views .filter-count { flex: 0 0 100%; margin-left: 0; }
+}
+
+/* Second pass. `.modal label` gave the custom-depth label a top margin and block display, so
+   its box sat 11px below the rest of the row; and the window picker kept tall padding
+   inside its new 34px height, clipping "Last 30 days". */
+.modal label.depth-custom, .scan-card label.depth-custom, .depth-custom { display: inline-flex !important; align-items: center; gap: 6px; margin: 0 !important; }
+.member-scan-controls select, .depth-row select { padding-top: 0; padding-bottom: 0; line-height: 32px; }
+.member-scan-controls .button { min-height: 34px; }
+
+/* A segmented switch in a page header matches the 40px buttons beside it. */
+.header-actions .segmented button { min-height: 32px; }
+
+/* On a laptop screen the members table was 65px wider than its panel, so the pinned row
+   actions covered the join dates. Tighter cells below 1400px make it fit. */
+@media (max-width: 1400px) {
+  .members-table td, .members-table th { padding-left: 9px; padding-right: 9px; }
+  .members-table th.sortable { padding: 0; }
+  .members-table .th-sort { padding: 11px 9px; }
+}

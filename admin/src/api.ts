@@ -56,6 +56,15 @@ export const CREDIT_USD = 1 / 100000
 export const formatUsd = (credits: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(credits * CREDIT_USD)
 
+/** A date without the time, for table columns where the hour only costs width. */
+export const formatDay = (value?: string) => {
+  if (!value) return 'Never'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  const sameYear = date.getFullYear() === new Date().getFullYear()
+  return new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric', ...(sameYear ? {} : { year: 'numeric' }) }).format(date)
+}
+
 export const formatDate = (value?: string) => {
   if (!value) return 'Never'
   const date = new Date(value)

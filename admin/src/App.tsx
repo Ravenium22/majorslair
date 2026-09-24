@@ -92,6 +92,11 @@ function Shell({ session, children }: { session: Session; children: ReactNode })
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
 
+  useEffect(() => {
+    if (route === 'help' && window.location.hash.includes('topic=')) return
+    window.scrollTo({ top: 0, behavior: 'auto' })
+  }, [route])
+
   const navigate = (next: RouteId) => {
     window.location.hash = next
     setRoute(next)
