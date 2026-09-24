@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Activity, AlertTriangle, ArrowUpRight, Bot, Check, Clock3, LoaderCircle, Play, Radar, RotateCcw, Trophy, Users } from 'lucide-react'
 import useSWR from 'swr'
 import { api, formatCount, formatDate, formatScore, formatUsd, mutateApi } from '../api'
-import { Empty, PageHeader, Status, Toast, useEscape } from '../components'
+import { Empty, HelpLink, PageHeader, Status, Toast, useEscape } from '../components'
 import type { LinkedUser, LowActivityReport, Overview, ScanEstimate, Session } from '../types'
 
 const WINDOWS = [['cycle', 'Whole cycle'], ['30d', 'Last 30 days'], ['60d', 'Last 60 days'], ['90d', 'Last 90 days'], ['180d', 'Last 6 months'], ['365d', 'Last 12 months']] as const
@@ -171,7 +171,7 @@ export default function OverviewPage({ session }: { session: Session }) {
           <ol className="cycle-steps">
             <li className={scannedThisCycle ? 'done' : ''}>Scan the window {scannedThisCycle && <small>done {formatDate(lastScan?.started_at)}</small>}</li>
             <li className={scannedThisCycle ? 'done' : ''}>Check what moved <a href="#scans">Scan reports</a></li>
-            <li>Review who is inactive {lowActivity && <small>{lowActivity.items.length} on the list</small>}<a href="#low-activity">Low-activity report</a></li>
+            <li>Review who is inactive, then mark them {lowActivity && <small>{lowActivity.items.length} on the list</small>}<a href="#low-activity">Low-activity report</a></li>
             <li>Reward the top <a href="#members">Give role</a></li>
             <li>Start the next cycle {cycleDays !== null && cycleDays >= 28 && <small>due</small>}<button className="link-button" onClick={() => setShowReset(true)}>Reset the leaderboard</button></li>
           </ol>
@@ -200,7 +200,7 @@ export default function OverviewPage({ session }: { session: Session }) {
           <p>Collect recent replies, quotes, retweets, and organic mentions from tracked accounts.</p>
           <label>Lookback window<select value={customWindow ? 'custom' : period} onChange={(event) => { const next = event.target.value; if (next === 'custom') { const days = customDays || String(cycleDays && cycleDays >= 1 ? cycleDays : 30); setCustomWindow(true); setCustomDays(days); setPeriod(`${days}d`) } else { setCustomWindow(false); setPeriod(next) } }}><option value="24h">Last 24 hours</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option><option value="60d">Last 60 days</option><option value="90d">Last 90 days</option><option value="180d">Last 6 months</option><option value="365d">Last 12 months</option><option value="custom">An exact number of days…</option></select></label>
           {customWindow && <label className="custom-days">Days to look back<input autoFocus type="number" min={1} max={366} step={1} inputMode="numeric" value={customDays} onChange={(event) => { const days = event.target.value.replace(/[^0-9]/g, '').slice(0, 3); setCustomDays(days); setPeriod(days ? `${days}d` : '') }} /><small className="field-hint">1 to 366. {cycleDays !== null && cycleDays > 0 ? `This cycle started ${cycleDays} day${cycleDays === 1 ? '' : 's'} ago, so ${cycleDays} covers all of it.` : 'Covers the whole cycle when it is at least as long as the cycle.'}</small></label>}
-          <p className="field-hint window-clamp">A scan never reaches back past the start of the current cycle, so a window longer than the cycle simply covers the whole cycle. Points from before the last reset cannot be counted twice.</p>
+          <p className="field-hint window-clamp">A scan never reaches back past the start of the current cycle, so a window longer than the cycle simply covers the whole cycle. Points from before the last reset cannot be counted twice. <HelpLink topic="scans" /></p>
           <button className="button primary" onClick={openScan} disabled={running || loadingEstimate || !periodValid} title={periodValid ? undefined : 'Enter a number of days between 1 and 366'}><Play size={17} />{running ? 'Scan running' : loadingEstimate ? 'Estimating cost…' : 'Run engagement scan'}</button>
           {running
             ? <div className="scan-progress"><p><LoaderCircle className="spin" size={15} /> Scanning the {data?.last_scan?.period} window · {elapsedLabel} so far</p><small>A long window can take 15 minutes. You can leave this page; the report appears under Scan reports when it finishes.</small></div>
@@ -224,7 +224,7 @@ export default function OverviewPage({ session }: { session: Session }) {
         <div className="modal-actions"><button type="button" className="button ghost" onClick={() => setEstimate(undefined)} disabled={starting}>Cancel</button><button className="button primary" onClick={scan} disabled={starting}><Play size={16} />{starting ? 'Starting…' : 'Start scan'}</button></div>
       </div></div>}
       {showReset && <div className="modal-backdrop" onMouseDown={() => { if (!resetting) setShowReset(false) }}><div className="modal" onMouseDown={(e) => e.stopPropagation()}>
-        <div className="modal-icon danger-icon"><AlertTriangle /></div><h2>Start a new cycle?</h2>
+        <div className="modal-icon danger-icon"><AlertTriangle /></div><h2>Start a new cycle?</h2><HelpLink topic="cycles" />
         <p>This freezes where everyone stands right now and sets every score back to zero. Nothing is deleted: the frozen table stays under Scan reports forever, and so does every scan report.</p>
         <dl className="cycle-facts freeze-summary">
           <dt>About to be frozen</dt>

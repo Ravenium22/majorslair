@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent,
 import { AlertTriangle, ArrowLeftRight, BadgeCheck, Download, ExternalLink, FileUp, Pencil, Plus, RefreshCw, Search, Shield, ShieldCheck, ShieldOff, Tags, Trash2, UserRoundCheck, UserRoundSearch, UserRoundX, X } from 'lucide-react'
 import useSWR from 'swr'
 import { api, formatCount, formatDate, formatScore, formatUsd, mutateApi } from '../api'
-import { Empty, Loading, PageHeader, Pagination, SortTh, Toast, useEscape } from '../components'
+import { Empty, HelpLink, Loading, PageHeader, Pagination, RoleExclusionPicker, SortTh, Toast, ToolsMenu, useConfirm, useEscape } from '../components'
 import { parseCsv, rowsFromSheet, type ImportRow } from '../csv'
 import type { Action, Adjustment, DiscordRole, DiscordSyncResponse, FollowCheckResult, FollowEstimate, ImportResponse, ImportStatus, LinkedUser, MemberScanResult, Paginated, RoleBulkResult, Session, VerifyResponse } from '../types'
 
@@ -48,6 +48,20 @@ const SORTS = [
 ] as const
 
 const hashParams = () => new URLSearchParams(window.location.hash.split('?')[1] ?? '')
+
+type FilterState = { filter: string; segment: string; protection: string; points: string; joined: string; follows: string }
+const DEFAULT_FILTERS: FilterState = { filter: 'active', segment: 'everyone', protection: 'any', points: 'any', joined: 'any', follows: 'any' }
+// Six rows of toggles were one screen's worth of decisions before the table even started.
+// These named lists cover the jobs that actually come up; the toggles stay behind More filters.
+const VIEWS: { id: string; label: string; hint: string; set: Partial<FilterState> }[] = [
+  { id: 'all', label: 'Everyone', hint: 'Everyone still in the server', set: {} },
+  { id: 'not-following', label: 'Not following', hint: 'Proven by the last follow check not to follow at least one account', set: { follows: 'missing' } },
+  { id: 'no-x', label: 'No X linked', hint: 'Cannot score until they link an X account', set: { segment: 'unlinked' } },
+  { id: 'zero', label: '0 points', hint: 'Nothing scored this cycle, protected members and newcomers included', set: { points: 'zero' } },
+  { id: 'x-issues', label: 'X suspended', hint: 'Their linked X account is suspended or gone', set: { segment: 'xissues' } },
+  { id: 'protected', label: 'Protected', hint: 'Never on the low-activity report', set: { protection: 'protected' } },
+  { id: 'inactive', label: 'Left or deactivated', hint: 'Out of the leaderboard and scans, history kept', set: { filter: 'inactive' } },
+]
 
 export default function MembersPage({ session }: { session: Session }) {
   const initial = useMemo(hashParams, [])
@@ -99,7 +113,6 @@ export default function MembersPage({ session }: { session: Session }) {
   const [roleResult, setRoleResult] = useState<RoleBulkResult>()
   const [roleBusy, setRoleBusy] = useState(false)
   const [excludeRoleIds, setExcludeRoleIds] = useState<string[]>([])
-  const [roleSearch, setRoleSearch] = useState('')
   // Ticked rows. Naming three people should not mean building a filter that matches
   // exactly those three, which was the only way to do it before.
   const [picked, setPicked] = useState<string[]>([])
@@ -168,7 +181,24 @@ export default function MembersPage({ session }: { session: Session }) {
     if (match) openMember(match)
     setPendingOpen('')
   }, [pendingOpen, data])
+  const confirm = useConfirm()
   const resetPage = <T,>(setter: (value: T) => void) => (value: T) => { setter(value); setPage(1) }
+  const currentFilters: FilterState = { filter, segment, protection, points, joined, follows }
+  const activeView = VIEWS.find((view) => (Object.keys(DEFAULT_FILTERS) as (keyof FilterState)[]).every((key) => currentFilters[key] === (view.set[key] ?? DEFAULT_FILTERS[key])))
+  const [showFilters, setShowFilters] = useState(false)
+  const filtersOpen = showFilters || !activeView
+  const extraFilters = (Object.keys(DEFAULT_FILTERS) as (keyof FilterState)[]).filter((key) => currentFilters[key] !== DEFAULT_FILTERS[key]).length
+  const applyView = (view: (typeof VIEWS)[number]) => {
+    const next = { ...DEFAULT_FILTERS, ...view.set }
+    setFilter(next.filter)
+    setSegment(next.segment as typeof segment)
+    setProtection(next.protection as typeof protection)
+    setPoints(next.points as typeof points)
+    setJoined(next.joined as typeof joined)
+    setFollows(next.follows as typeof follows)
+    setLowThreshold('')
+    setPage(1)
+  }
   const hasFilters = Boolean(search) || filter !== 'active' || segment !== 'everyone' || protection !== 'any' || points !== 'any' || joined !== 'any' || follows !== 'any'
   const clearFilters = () => { setSearch(''); setFilter('active'); setSegment('everyone'); setProtection('any'); setPoints('any'); setLowThreshold(''); setJoined('any'); setFollows('any'); setSort('score_desc'); setPage(1) }
 
@@ -185,16 +215,40 @@ export default function MembersPage({ session }: { session: Session }) {
   const [deleteConfirmText, setDeleteConfirmText] = useState('')
   const [deleteIgnore, setDeleteIgnore] = useState(true)
   const [deleting, setDeleting] = useState(false)
-  const toggleActive = (user: LinkedUser) => {
+  const toggleActive = async (user: LinkedUser) => {
     if (user.active) { setConfirmDeactivate(user); return }
+    if (!(await confirm({
+      title: `Reactivate ${user.discord_username}?`,
+      body: 'They go back on the leaderboard with the points and history they had, and the next scans include them again.',
+      confirmLabel: 'Reactivate',
+    }))) return
     return patch(user, { active: true }, `${user.discord_username} reactivated.`)
   }
-  const toggleProtected = (user: LinkedUser) => patch(user, { special_role: !user.special_role }, `${user.discord_username} is ${user.special_role ? 'no longer protected' : 'now protected from the low-activity report'}.`)
+  const toggleProtected = async (user: LinkedUser) => {
+    const protecting = !user.special_role
+    if (!(await confirm(protecting ? {
+      title: `Protect ${user.discord_username}?`,
+      body: 'They will never appear on the low-activity report, and scans leave them out whenever "skip protected members" is ticked. Nothing changes in Discord.',
+      confirmLabel: 'Protect',
+    } : {
+      title: `Remove protection from ${user.discord_username}?`,
+      body: <>They can appear on the low-activity report again.{user.role_protected_names ? <> They still hold <strong>{user.role_protected_names}</strong> in Discord, so the next sync will protect them again unless that role is removed there.</> : null}</>,
+      confirmLabel: 'Remove protection',
+      tone: 'danger',
+    }))) return
+    return patch(user, { special_role: protecting }, `${user.discord_username} is ${protecting ? 'now protected from the low-activity report' : 'no longer protected'}.`)
+  }
 
   const [linking, setLinking] = useState(false)
   const link = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const values = Object.fromEntries(new FormData(event.currentTarget))
+    const handle = String(values.twitter_handle ?? '').replace(/^@/, '')
+    if (!(await confirm({
+      title: `Link ${String(values.discord_username || values.discord_user_id || 'this member')} to @${handle}?`,
+      body: 'The X account is checked on X before anything is saved. An X account can belong to only one member, so this fails rather than taking it from someone else.',
+      confirmLabel: 'Link member',
+    }))) return
     setLinking(true)
     try {
       await mutateApi('/api/users/link', session.csrf_token, 'POST', values)
@@ -222,6 +276,11 @@ export default function MembersPage({ session }: { session: Session }) {
 
   const runImport = async () => {
     if (!importRows.length) return
+    if (!(await confirm({
+      title: `Import ${importRows.length} row${importRows.length === 1 ? '' : 's'}?`,
+      body: <>Members missing from the registry are added, and {withHandles} X handle{withHandles === 1 ? '' : 's'} will be checked on X and linked{withSpecial ? <>. {withSpecial} will be marked protected by hand</> : null}. Existing members keep their points. Rows that conflict are listed afterwards instead of being forced.</>,
+      confirmLabel: 'Import',
+    }))) return
     setImporting(true)
     try {
       const response = await mutateApi<ImportResponse>('/api/users/import', session.csrf_token, 'POST', { rows: importRows })
@@ -235,6 +294,11 @@ export default function MembersPage({ session }: { session: Session }) {
   }
 
   const runSync = async () => {
+    if (!(await confirm({
+      title: 'Sync with the Discord server?',
+      body: <><p>This reads the server's member list and brings the registry in line with it:</p><ul className="confirm-list"><li>registers members who are missing, skipping bots and ignored IDs</li><li>updates handles and join dates</li><li>protects or unprotects people by the Discord roles they hold right now</li><li>marks people who left the server as inactive, keeping their points</li></ul><p>It never changes anyone's Discord account and uses no X credits.</p></>,
+      confirmLabel: 'Sync now',
+    }))) return
     setSyncing(true)
     try {
       const response = await mutateApi<DiscordSyncResponse>('/api/users/sync-discord', session.csrf_token, 'POST')
@@ -315,7 +379,6 @@ export default function MembersPage({ session }: { session: Session }) {
     setRoleResult(undefined)
     setRolePreview(undefined)
     setInheritFilters(false)
-    setRoleSearch('')
     setRoleMin('')
     setRoleMax('')
     try {
@@ -326,8 +389,6 @@ export default function MembersPage({ session }: { session: Session }) {
     } catch (error) { setNotice({ text: error instanceof Error ? error.message : 'Could not load roles', kind: 'error' }) }
   }
 
-  const excluded = roles?.roles.filter((r) => excludeRoleIds.includes(r.id)) ?? []
-  const visibleRoles = (roles?.roles ?? []).filter((r) => r.name.toLowerCase().includes(roleSearch.trim().toLowerCase()))
 
   const previewRoles = async () => {
     setRoleBusy(true)
@@ -338,6 +399,14 @@ export default function MembersPage({ session }: { session: Session }) {
 
   const applyRoles = async () => {
     if (!roleId) { setNotice({ text: 'Pick a role first', kind: 'error' }); return }
+    const roleName = roles?.roles.find((r) => r.id === roleId)?.name ?? 'this role'
+    const count = rolePreview?.matched ?? 0
+    if (!(await confirm({
+      title: `${roleAction === 'add' ? 'Give' : 'Remove'} ${roleName} ${roleAction === 'add' ? 'to' : 'from'} ${count} member${count === 1 ? '' : 's'}?`,
+      body: 'This changes their roles in Discord straight away. Anyone holding a role you chose to leave alone is checked again at this moment and skipped. Undoing it means running the opposite action.',
+      confirmLabel: `${roleAction === 'add' ? 'Give' : 'Remove'} the role`,
+      tone: 'danger',
+    }))) return
     setRoleBusy(true)
     try {
       const result = await mutateApi<RoleBulkResult>('/api/users/roles', session.csrf_token, 'POST', { role_id: roleId, action: roleAction, filters: roleFilters(), discord_user_ids: usingPicked ? picked : [], dry_run: false, exclude_role_ids: excludeRoleIds })
@@ -357,12 +426,24 @@ export default function MembersPage({ session }: { session: Session }) {
     const transfer_to = adjustMode === 'transfer' ? String(form.get('transfer_to') ?? '').trim() : ''
     if (!points || Number.isNaN(points)) { setNotice({ text: 'Enter a non-zero amount', kind: 'error' }); return }
     if (adjustMode === 'transfer' && !transfer_to) { setNotice({ text: 'Enter who receives the points', kind: 'error' }); return }
+    const formElement = event.currentTarget
+    const reasonNote = reason ? ` Reason recorded: "${reason}".` : ''
+    if (!(await confirm(adjustMode === 'transfer' ? {
+      title: `Move ${formatScore(Math.abs(points))} points from ${selected.discord_username} to ${transfer_to}?`,
+      body: `Both members' totals change now and the leaderboard follows.${reasonNote} To undo it, transfer the points back.`,
+      confirmLabel: 'Move points',
+    } : {
+      title: `${points > 0 ? 'Add' : 'Take away'} ${formatScore(Math.abs(points))} points ${points > 0 ? 'for' : 'from'} ${selected.discord_username}?`,
+      body: `Their total changes now and the leaderboard follows.${reasonNote} To undo it, make the opposite adjustment.`,
+      confirmLabel: points > 0 ? 'Add points' : 'Take points away',
+      tone: points > 0 ? 'default' : 'danger',
+    }))) return
     setAdjusting(true)
     try {
       const result = await mutateApi<{ member: LinkedUser | null }>(`/api/users/${selected.discord_user_id}/adjust`, session.csrf_token, 'POST', { points: adjustMode === 'transfer' ? Math.abs(points) : points, reason, transfer_to: transfer_to || null })
       if (result.member) setSelected(result.member)
       setNotice({ text: adjustMode === 'transfer' ? `Moved ${formatScore(Math.abs(points))} points from ${selected.discord_username} to ${transfer_to}.` : `${points > 0 ? '+' : ''}${formatScore(points)} points for ${selected.discord_username}.`, kind: 'success' })
-      ;(event.target as HTMLFormElement).reset()
+      formElement.reset()
       await Promise.all([mutate(), mutateAdjustments()])
     } catch (error) { setNotice({ text: error instanceof Error ? error.message : 'Adjustment failed', kind: 'error' }) }
     finally { setAdjusting(false) }
@@ -370,6 +451,12 @@ export default function MembersPage({ session }: { session: Session }) {
 
   const runMemberScan = async () => {
     if (!selected) return
+    if (!(await confirm({
+      title: `Scan ${selected.discord_username}'s timeline?`,
+      body: `Reads up to ${formatCount(memberDepthTweets)} of their latest tweets for the chosen window. It costs at most ${formatUsd(memberDepth * 20 * 15)}, usually much less because it stops at the window start. Anything newly matched is scored straight away.`,
+      confirmLabel: 'Scan this member',
+      tone: 'cost',
+    }))) return
     setMemberScanning(true)
     try {
       const result = await mutateApi<MemberScanResult>(`/api/users/${selected.discord_user_id}/scan`, session.csrf_token, 'POST', { period: memberPeriod, max_pages: memberDepth })
@@ -445,6 +532,17 @@ export default function MembersPage({ session }: { session: Session }) {
     const twitter_handle = String(form.get('twitter_handle') ?? '').trim().replace(/^@/, '')
     const special_role = form.get('special_role') === 'on'
     const special_role_names = String(form.get('special_role_names') ?? '').trim()
+    const changes: string[] = []
+    if (discord_username && discord_username !== selected.discord_username) changes.push(`Discord handle becomes ${discord_username}`)
+    if (twitter_handle && twitter_handle.toLowerCase() !== selected.twitter_handle.toLowerCase()) changes.push(`X account becomes @${twitter_handle}, checked on X before it is saved`)
+    if (special_role !== selected.special_role) changes.push(special_role ? 'protected by hand' : 'protection set by hand is removed')
+    else if (special_role && special_role_names !== selected.special_role_names) changes.push(`protection label becomes "${special_role_names}"`)
+    if (!changes.length) { setTool('none'); setNotice({ text: 'Nothing changed.', kind: 'success' }); return }
+    if (!(await confirm({
+      title: `Save changes to ${selected.discord_username}?`,
+      body: <ul className="confirm-list">{changes.map((change) => <li key={change}>{change}</li>)}</ul>,
+      confirmLabel: 'Save changes',
+    }))) return
     setSaving(true)
     try {
       const body: Record<string, unknown> = {}
@@ -475,12 +573,14 @@ export default function MembersPage({ session }: { session: Session }) {
 
   return <div className="page">
     <PageHeader title="Linked members" copy="Everyone in the community, with or without an X account. Protected members never appear in the low-activity report." actions={<button className="button primary" onClick={() => setShowLink(true)}><Plus size={17} /> Link member</button>} toolbar={<>
-      <button className="button" onClick={openVerify} disabled={verifying} title="Check linked X accounts for suspensions, deletions, and renames (about 10 credits each)"><BadgeCheck size={17} className={verifying ? 'spin' : ''} /> {verifying ? 'Checking X…' : 'Verify X accounts'}</button>
-      <button className="button" onClick={runSync} disabled={syncing} title="Register every human member of the Discord server who is missing here"><RefreshCw size={17} className={syncing ? 'spin' : ''} /> {syncing ? 'Syncing…' : 'Sync from Discord'}</button>
-      <button className="button" onClick={openFollowCheck} disabled={followBusy} title="Check which members follow the primary and secondary accounts"><UserRoundSearch size={17} className={followBusy ? 'spin' : ''} /> {followBusy ? 'Checking…' : 'Check follows'}</button>
+      <button className="button" onClick={runSync} disabled={syncing} title="Bring the registry in line with the Discord server"><RefreshCw size={17} className={syncing ? 'spin' : ''} /> {syncing ? 'Syncing…' : 'Sync from Discord'}</button>
       <button className="button" onClick={openRoles}><Tags size={17} /> Give role</button>
-      <button className="button" onClick={() => setShowImport(true)}><FileUp size={17} /> Import CSV</button>
-      <a className="button" href={`/api/users/export?${filterQuery}`} title="Download the list exactly as filtered below"><Download size={17} /> Export CSV</a>
+      <ToolsMenu items={[
+        { label: verifying ? 'Checking X accounts…' : 'Verify X accounts', hint: 'Find suspended, deleted or renamed accounts', icon: <BadgeCheck size={16} />, onSelect: openVerify, disabled: verifying },
+        { label: followBusy ? 'Checking follows…' : 'Check follows', hint: 'Who follows both tracked accounts', icon: <UserRoundSearch size={16} />, onSelect: openFollowCheck, disabled: followBusy },
+        { label: 'Import CSV', hint: 'Add or link members from a sheet', icon: <FileUp size={16} />, onSelect: () => setShowImport(true) },
+        { label: 'Export CSV', hint: 'Download the list as filtered below', icon: <Download size={16} />, href: `/api/users/export?${filterQuery}` },
+      ]} />
     </>} />
     {notice && <Toast message={notice.text} kind={notice.kind} />}
     <section className="panel">
@@ -489,7 +589,14 @@ export default function MembersPage({ session }: { session: Session }) {
         <label className="search"><Search size={17} /><input value={search} onChange={(e) => { setSearch(e.target.value); setPage(1) }} placeholder="Search Discord handle, X handle, ID, or role" /></label>
         <select value={sort} onChange={(e) => resetPage(setSort)(e.target.value as typeof sort)} aria-label="Sort">{SORTS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select>
       </div>
-      <div className="toolbar filters wrap">
+      <div className="toolbar views" role="group" aria-label="Lists">
+        {VIEWS.map((view) => <button key={view.id} type="button" className={`view-pill ${activeView?.id === view.id ? 'active' : ''}`} aria-pressed={activeView?.id === view.id} title={view.hint} onClick={() => applyView(view)}>{view.label}</button>)}
+        {!activeView && <span className="view-pill custom active" aria-live="polite">Custom filter</span>}
+        {activeView && <button type="button" className={`link-button more-filters ${filtersOpen ? 'open' : ''}`} aria-expanded={filtersOpen} aria-controls="member-filters" onClick={() => setShowFilters(!filtersOpen)}>{filtersOpen ? 'Fewer filters' : 'More filters'}{extraFilters && !filtersOpen ? ` (${extraFilters})` : ''}</button>}
+        <a className="link-button purge-link" href="#low-activity">Purge list on the low-activity report</a>
+        {!filtersOpen && <span className="filter-count">{data ? `${formatCount(data.total)} member${data.total === 1 ? '' : 's'}` : ''}</span>}
+      </div>
+      {filtersOpen && <div className="toolbar filters wrap" id="member-filters">
         <div className="segmented">{SEGMENTS.map((item) => <button className={segment === item.id ? 'active' : ''} aria-pressed={segment === item.id} onClick={() => resetPage(setSegment)(item.id)} key={item.id}>{item.label}</button>)}</div>
         <div className="segmented">{PROTECTION.map((item) => <button className={protection === item.id ? 'active' : ''} aria-pressed={protection === item.id} onClick={() => resetPage(setProtection)(item.id)} key={item.id}>{item.label}</button>)}</div>
         <div className="segmented">{POINTS.map((item) => <button className={points === item.id ? 'active' : ''} aria-pressed={points === item.id} onClick={() => resetPage(setPoints)(item.id)} key={item.id} title={item.id === 'low' ? 'Everyone at or below the threshold, protected members and newcomers included. The Low-activity report leaves those out.' : undefined}>{item.label}</button>)}</div>
@@ -499,7 +606,7 @@ export default function MembersPage({ session }: { session: Session }) {
         <div className="segmented">{JOINED.map((item) => <button className={joined === item.id ? 'active' : ''} aria-pressed={joined === item.id} onClick={() => resetPage(setJoined)(item.id)} key={item.id} title={item.id === 'new' ? 'Joined Discord within the grace period (newcomer_grace_days in Scoring rules); never in the low-activity report' : item.id === 'established' ? 'Joined before the grace period, or join date unknown' : undefined}>{item.label}</button>)}</div>
         <div className="segmented">{['active', 'inactive', 'all'].map((value) => <button className={filter === value ? 'active' : ''} aria-pressed={filter === value} onClick={() => resetPage(setFilter)(value)} key={value}>{value === 'active' ? 'Active' : value === 'inactive' ? 'Inactive' : 'All'}</button>)}</div>
         <span className="filter-count">{data ? `${formatCount(data.total)} member${data.total === 1 ? '' : 's'}` : ''}{hasFilters && <button className="link-button" onClick={clearFilters}>Clear filters</button>}</span>
-      </div>
+      </div>}
       <div className="table-wrap"><table><thead><tr>
         <th className="pick-cell"><label className="pick-box"><input type="checkbox" aria-label="Select every member on this page" checked={Boolean(data?.items.length) && (data?.items ?? []).every((u) => picked.includes(u.discord_user_id))} onChange={(e) => { const ids = (data?.items ?? []).map((u) => u.discord_user_id); setPicked(e.target.checked ? [...new Set([...picked, ...ids])] : picked.filter((id) => !ids.includes(id))) }} /></label></th>
         <SortTh label="Discord" direction={sort === 'name' ? 'asc' : undefined} onToggle={() => resetPage(setSort)('name')} />
@@ -516,8 +623,8 @@ export default function MembersPage({ session }: { session: Session }) {
         {data?.items.map((user) => <tr key={user.discord_user_id} className={`member-row ${picked.includes(user.discord_user_id) ? 'picked' : ''}`} onClick={() => openMember(user)}>
           <td className="pick-cell" onClick={(e) => e.stopPropagation()}><label className="pick-box"><input type="checkbox" checked={picked.includes(user.discord_user_id)} aria-label={`Select ${user.discord_username}`} onChange={(e) => setPicked(e.target.checked ? [...picked, user.discord_user_id] : picked.filter((id) => id !== user.discord_user_id))} /></label></td>
           <td><button type="button" className="member-cell linked-cell" onClick={(e) => { e.stopPropagation(); openMember(user) }}><strong>{user.discord_username}</strong><small className="mono">{user.discord_user_id}</small></button></td>
-          <td>{user.twitter_user_id ? <span className="protected-cell"><a href={`https://x.com/${user.twitter_handle}`} target="_blank">@{user.twitter_handle}</a>{(user.x_status === 'suspended' || user.x_status === 'unavailable') && <span className="status failed"><i />X {user.x_status}</span>}</span> : <span className="muted">Not linked</span>}</td>
-          <td>{user.special_role ? <span className="protected-cell"><span className="status complete"><i />Protected</span>{user.special_role_names && <small>{user.special_role_names}</small>}</span> : <span className="muted">—</span>}</td>
+          <td>{user.twitter_user_id ? <span className="protected-cell"><a href={`https://x.com/${user.twitter_handle}`} target="_blank" rel="noreferrer">@{user.twitter_handle}</a>{(user.x_status === 'suspended' || user.x_status === 'unavailable') && <span className="status failed"><i />X {user.x_status}</span>}{user.follows_primary === 'yes' && user.follows_secondary === 'yes' ? <small className="follow-ok">follows both</small> : user.follows_primary === 'no' || user.follows_secondary === 'no' ? <small className="follow-missing" title={user.follows_primary === 'no' && user.follows_secondary === 'no' ? 'Follows neither tracked account' : user.follows_primary === 'no' ? 'Does not follow the primary account' : 'Does not follow the secondary account'}>{user.follows_primary === 'no' && user.follows_secondary === 'no' ? 'follows neither' : 'missing a follow'}</small> : null}</span> : <span className="muted">Not linked</span>}</td>
+          <td>{user.special_role ? <span className="protected-cell"><span className="status complete"><i />Protected</span><small title={user.role_protected_names ? 'Granted by a Discord role. Removing the role in Discord removes this at the next sync.' : 'Set here by hand. Sync never changes it.'}>{user.role_protected_names ? `role: ${user.role_protected_names}` : `by hand${user.special_role_names ? `: ${user.special_role_names}` : ''}`}</small></span> : <span className="muted">—</span>}</td>
           <td className="score">{formatScore(user.score)}</td>
           <td>{formatDate(user.last_active_at)}</td>
           <td>{user.discord_joined_at ? <span className="protected-cell">{formatDate(user.discord_joined_at)}<small>{daysAgo(user.discord_joined_at)} days ago</small></span> : <span className="muted" title="Run Sync from Discord to fill join dates">—</span>}</td>
@@ -571,6 +678,7 @@ export default function MembersPage({ session }: { session: Session }) {
       </form>}
       {tool === 'points' && <div className="member-scan adjust-panel">
         <div><h3 className="sub-heading"><ArrowLeftRight size={13} /> Points: add, remove or transfer</h3><p className="muted small">Manual adjustments are kept separately from scanned actions, so scans and rescoring never undo them. Every one is logged in the Audit trail with who did it and why.</p></div>
+        <HelpLink topic="points" />
         <form className="adjust-form" onSubmit={submitAdjust}>
           <div className="segmented adjust-mode"><button type="button" className={adjustMode === 'add' ? 'active' : ''} onClick={() => setAdjustMode('add')}>Add / remove</button><button type="button" className={adjustMode === 'transfer' ? 'active' : ''} onClick={() => setAdjustMode('transfer')}>Transfer to someone</button></div>
           <div className="adjust-fields">
@@ -583,7 +691,7 @@ export default function MembersPage({ session }: { session: Session }) {
         {adjustments && adjustments.length > 0 && <div className="table-wrap"><table><thead><tr><th>When</th><th>Points</th><th>Reason</th><th>By</th><th>Counterpart</th></tr></thead><tbody>{adjustments.map((a) => <tr key={a.adjustment_id}><td>{formatDate(a.created_at)}</td><td className={`score ${a.points >= 0 ? 'gain' : 'loss'}`}>{a.points >= 0 ? '+' : ''}{formatScore(a.points)}</td><td className="muted">{a.reason || '—'}</td><td className="mono">{a.actor_discord_id}</td><td className="mono">{a.counterpart_discord_id || '—'}</td></tr>)}</tbody></table></div>}
       </div>}
       {tool === 'scan' && selected.twitter_user_id && <div className="member-scan">
-        <div><h3 className="sub-heading">Scan this member only</h3><p className="muted small">Reads their own timeline (replies included) back to the start of the period or until the depth is reached, whichever comes first. Costs up to {formatUsd(memberDepth * 20 * 15)} ({formatCount(memberDepth * 20 * 15)} credits), usually far less because it stops at the period start. Catches replies X hides everywhere else. Pick a bigger depth for long periods on active posters.</p></div>
+        <div><h3 className="sub-heading">Scan this member only</h3><HelpLink topic="member-scan" label="What this scan counts" /><p className="muted small">Reads their own timeline (replies included) back to the start of the period or until the depth is reached, whichever comes first. Costs up to {formatUsd(memberDepth * 20 * 15)} ({formatCount(memberDepth * 20 * 15)} credits), usually far less because it stops at the period start. Catches replies X hides everywhere else. Pick a bigger depth for long periods on active posters.</p></div>
         <div className="member-scan-controls"><div className="depth-picker"><span className="muted small">Latest tweets to read:</span><div className="segmented">{[100, 300, 500, 1000, 2000].map((n) => <button type="button" key={n} className={memberDepthTweets === n ? 'active' : ''} onClick={() => setMemberDepthTweets(n)} disabled={memberScanning}>{formatCount(n)}</button>)}</div><label className="depth-custom">custom<input type="number" min={20} max={5000} step={20} value={memberDepthTweets} onChange={(e) => setMemberDepthTweets(Math.min(5000, Math.max(20, Number(e.target.value) || 20)))} disabled={memberScanning} /></label></div><select value={memberPeriod} onChange={(e) => setMemberPeriod(e.target.value)} disabled={memberScanning}><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option><option value="60d">Last 60 days</option><option value="90d">Last 90 days</option><option value="180d">Last 6 months</option><option value="365d">Last 12 months</option></select><button className="button primary" onClick={runMemberScan} disabled={memberScanning}>{memberScanning ? 'Scanning…' : 'Scan this member'}</button></div>
         {memberScan && <p className="import-summary">Read {memberScan.tweets_read} tweets{memberScan.timeline_ended_early ? ` (X's timeline feed stopped at ${memberScan.timeline_ended_at ? formatDate(memberScan.timeline_ended_at) : 'an earlier date'} after ${memberScan.timeline_read ?? 0}; search found ${memberScan.search_filled ?? 0} more back to the period start)` : ''} · matched {memberScan.matched} ({memberScan.replies} replies, {memberScan.quotes} quotes, {memberScan.mentions} mentions) · {memberScan.new_actions} new · points {formatScore(memberScan.points_before)} → <strong>{formatScore(memberScan.points_after)}</strong>{memberScan.complete ? '' : ' · depth cap reached, older tweets skipped'} · ≈ {formatCount((Math.max(memberScan.items_returned, memberScan.api_requests) * 15))} credits · saved under <a href="#scans">Scan reports</a></p>}
       </div>}
@@ -595,7 +703,7 @@ export default function MembersPage({ session }: { session: Session }) {
     </div></div>}
 
     {followPlan && <div className="modal-backdrop" onMouseDown={() => { if (!followBusy) setFollowPlan(undefined) }}><div className="modal" onMouseDown={(e) => e.stopPropagation()}>
-      <div className="modal-icon"><UserRoundSearch /></div><h2>Check who follows the tracked accounts</h2>
+      <div className="modal-icon"><UserRoundSearch /></div><h2>Check who follows the tracked accounts</h2><HelpLink topic="follows" />
       <p>This reads the follower list of each tracked account once and matches your {followPlan.linked_members} linked members against it. That is far cheaper than asking about each member, and it is the only way to be sure.</p>
       <dl className="estimate-grid" data-dialog-focus tabIndex={-1} aria-live="polite">
         {followPlan.accounts.map((account) => <div key={account.slot}><dt>@{account.handle}</dt><dd>{account.error ? '—' : formatCount(account.followers ?? 0)}<small>{account.error ? account.error : 'followers to read'}</small></dd></div>)}
@@ -614,7 +722,7 @@ export default function MembersPage({ session }: { session: Session }) {
     </div></div>}
 
     {confirmDelete && <div className="modal-backdrop stacked" onMouseDown={() => { if (!deleting) setConfirmDelete(undefined) }}><div className="modal" onMouseDown={(e) => e.stopPropagation()}>
-      <div className="modal-icon danger-icon"><Trash2 /></div><h2>Delete {confirmDelete.discord_username} for good?</h2>
+      <div className="modal-icon danger-icon"><Trash2 /></div><h2>Delete {confirmDelete.discord_username} for good?</h2><HelpLink topic="members" label="Deactivating and deleting" />
       <p>This erases the record itself, not just their standing. Gone for good: <strong>{formatScore(confirmDelete.score)} points</strong>, every scored action behind them, and every manual adjustment. Frozen leaderboards from closed cycles keep their copy, and so does the Audit trail, so past cycles still add up. Nothing happens to their Discord account.</p>
       <p className="muted small">To park somebody instead, keeping their history and points so you can bring them back, close this and use Deactivate.</p>
       <label className="check-row"><input type="checkbox" checked={deleteIgnore} onChange={(e) => setDeleteIgnore(e.target.checked)} disabled={deleting} /> Never let Sync from Discord add them back{selected?.active ? ' (they are still in the server, so leave this on)' : ''}</label>
@@ -629,7 +737,7 @@ export default function MembersPage({ session }: { session: Session }) {
     </div></div>}
 
     {showRoles && <div className="modal-backdrop" onMouseDown={() => { if (!roleBusy) setShowRoles(false) }}><div className="modal modal-wide" onMouseDown={(e) => e.stopPropagation()}>
-      <div className="modal-icon"><Tags /></div><h2>Give or remove a role in bulk</h2>
+      <div className="modal-icon"><Tags /></div><h2>Give or remove a role in bulk</h2><HelpLink topic="purge" />
       <p className="role-audience">This will affect <strong>{audience}</strong>{roleId ? <>, {roleAction === 'add' ? 'giving them' : 'taking away'} <strong>{roles?.roles.find((r) => r.id === roleId)?.name}</strong></> : null}. Preview first, then apply. Every run is logged in the Audit trail.</p>
       {roles && !roles.bot_can_manage_roles && <p className="estimate-warning">The bot has no <strong>Manage Roles</strong> permission in Discord. Server Settings → Roles → the bot's role → enable Manage Roles, and drag the bot's role above the roles you want it to give.</p>}
       <div className="role-grid">
@@ -638,18 +746,7 @@ export default function MembersPage({ session }: { session: Session }) {
         <label>Min points<input type="number" step="1" value={roleMin} onChange={(e) => setRoleMin(e.target.value)} placeholder="any" disabled={roleBusy} /></label>
         <label>Max points<input type="number" step="1" value={roleMax} onChange={(e) => setRoleMax(e.target.value)} placeholder="any" disabled={roleBusy} /></label>
       </div>
-      {/* This was a native multi-select holding every role in the server, with "hold Ctrl"
-          as the instruction. Roles are now chips you can read and a list you can filter. */}
-      <fieldset className="exclude-roles" disabled={roleBusy}>
-        <legend>Leave alone anyone who has one of these roles</legend>
-        <p className="field-hint">Checked live at the moment you apply, so a role given after the preview still counts. Server Booster is on by default.</p>
-        {excluded.length > 0 && <ul className="role-chips">{excluded.map((r) => <li key={r.id}><button type="button" onClick={() => setExcludeRoleIds(excludeRoleIds.filter((id) => id !== r.id))} aria-label={`Stop protecting ${r.name}`}>{r.name}{r.booster && !/boost/i.test(r.name) ? ' · booster' : ''}<X size={13} /></button></li>)}</ul>}
-        <label className="role-search"><Search size={15} /><input value={roleSearch} onChange={(e) => setRoleSearch(e.target.value)} placeholder={`Search ${roles?.roles.length ?? 0} roles`} /></label>
-        <div className="role-options" role="group" aria-label="Roles to leave alone">
-          {visibleRoles.map((r) => <label key={r.id}><input type="checkbox" checked={excludeRoleIds.includes(r.id)} onChange={(e) => setExcludeRoleIds(e.target.checked ? [...excludeRoleIds, r.id] : excludeRoleIds.filter((id) => id !== r.id))} /><span>{r.name}{r.booster && !/boost/i.test(r.name) ? <em>Server Booster</em> : null}</span></label>)}
-          {visibleRoles.length === 0 && <p className="field-hint">No role matches that.</p>}
-        </div>
-      </fieldset>
+      <RoleExclusionPicker roles={roles?.roles ?? []} value={excludeRoleIds} onChange={setExcludeRoleIds} disabled={roleBusy} />
       {!usingPicked && pageClauses.length > 0 && <label className="role-inherit"><input type="checkbox" checked={inheritFilters} onChange={(e) => setInheritFilters(e.target.checked)} disabled={roleBusy} /><span>Narrow this to the filters set on the Members page<small>{pageClauses.join(', ')}</small></span></label>}
       {rolePreview?.unverified?.length ? <p className="estimate-warning"><strong>{rolePreview.unverified.length}</strong> member{rolePreview.unverified.length === 1 ? '' : 's'} left out because Discord would not say which roles they hold ({rolePreview.unverified.slice(0, 6).map((u) => u.discord_username).join(', ')}{rolePreview.unverified.length > 6 ? '…' : ''}). Rather than risk changing someone who is protected, they are not touched. Try again in a minute.</p> : null}
       {rolePreview && !roleResult && <><p className="import-summary"><strong>{rolePreview.matched}</strong> members match{rolePreview.skipped?.length ? <> · <strong>{rolePreview.skipped.length}</strong> left alone because of their roles ({rolePreview.skipped.slice(0, 6).map((s) => s.discord_username).join(', ')}{rolePreview.skipped.length > 6 ? '…' : ''})</> : null}. {rolePreview.matched > 500 ? 'Showing the first 500.' : ''}</p><div className="table-wrap import-results"><table><tbody>{rolePreview.members?.map((m) => <tr key={m.discord_user_id}><td><span className="member-cell"><strong>{m.discord_username}</strong><small className="mono">{m.discord_user_id}</small></span></td><td className="score">{formatScore(m.score)}</td><td>{m.special_role ? <span className="status complete"><i />Protected</span> : ''}</td></tr>)}</tbody></table></div></>}
@@ -694,7 +791,7 @@ export default function MembersPage({ session }: { session: Session }) {
     </div></div>}
 
     {syncResult && <div className="modal-backdrop" onMouseDown={() => setSyncResult(undefined)}><div className="modal modal-wide" onMouseDown={(e) => e.stopPropagation()}>
-      <div className="modal-icon"><RefreshCw /></div><h2>Server members compared with the registry</h2>
+      <div className="modal-icon"><RefreshCw /></div><h2>Server members compared with the registry</h2><HelpLink topic="sync" label="How sync works" />
       <p className="import-summary">{syncResult.discord_members} humans in the server · {syncResult.added.length} newly registered · {syncResult.already_registered_active} already present + {syncResult.already_registered_inactive} inactive · {syncResult.bots_skipped} bots skipped{syncResult.ignored ? ` · ${syncResult.ignored} ignored on purpose` : ''} · {syncResult.deactivated.length} deactivated after leaving the server.</p>
       <p className="import-summary">Registry now holds <strong>{syncResult.registry_active} active + {syncResult.registry_inactive} inactive</strong> members.</p>
       {syncResult.unmatched_role_names?.length > 0 && <p className="estimate-warning">No role in the server is named {syncResult.unmatched_role_names.map((row) => <code key={row.configured}>{row.configured}</code>).reduce<ReactNode[]>((acc, el, i) => i ? [...acc, ' or ', el] : [el], [])}, so nobody is protected by it. Discord role names often carry an emoji, and the name has to match exactly.{syncResult.unmatched_role_names.some((row) => row.did_you_mean.length) && <> Did you mean {syncResult.unmatched_role_names.flatMap((row) => row.did_you_mean).map((name) => <code key={name}>{name}</code>).reduce<ReactNode[]>((acc, el, i) => i ? [...acc, ' or ', el] : [el], [])}? Copy the name exactly into <strong>protected_role_names</strong> on <a href="#scoring">Scoring rules</a>, then sync again.</>}</p>}

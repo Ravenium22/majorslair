@@ -1,6 +1,7 @@
-import { Component, useEffect, useState, type ErrorInfo, type ReactNode } from 'react'
-import { AlertCircle, Check, ChevronDown, ChevronUp, ChevronsUpDown, LoaderCircle, X } from 'lucide-react'
+import { Component, createContext, useCallback, useContext, useEffect, useRef, useState, type ErrorInfo, type ReactNode } from 'react'
+import { AlertCircle, AlertTriangle, Check, ChevronDown, ChevronUp, ChevronsUpDown, CircleHelp, Coins, Ellipsis, LoaderCircle, Search, X } from 'lucide-react'
 import { formatCount } from './api'
+import type { DiscordRole } from './types'
 
 /** Close something with the Escape key while it is open. */
 export function useEscape(active: boolean, onClose: () => void) {
@@ -141,4 +142,163 @@ export class PageErrorBoundary extends Component<
       </div>
     )
   }
+}
+
+
+export type ConfirmOptions = {
+  title: string
+  /** What will happen, in a sentence or two. Say the consequence, not "are you sure". */
+  body: ReactNode
+  confirmLabel: string
+  cancelLabel?: string
+  /** danger: changes something people will notice or hard to undo. cost: spends credits. */
+  tone?: 'default' | 'danger' | 'cost'
+}
+
+type PendingConfirm = { options: ConfirmOptions; resolve: (answer: boolean) => void }
+
+const ConfirmContext = createContext<(options: ConfirmOptions) => Promise<boolean>>(async () => true)
+
+/** Every action that changes data asks first. One dialog for all of them, so each page only
+ *  has to write `if (!(await confirm({...}))) return` in front of the call. */
+export function ConfirmProvider({ children }: { children: ReactNode }) {
+  const [pending, setPending] = useState<PendingConfirm>()
+  const confirm = useCallback(
+    (options: ConfirmOptions) => new Promise<boolean>((resolve) => setPending({ options, resolve })),
+    [],
+  )
+  const answer = useCallback((value: boolean) => {
+    setPending((current) => { current?.resolve(value); return undefined })
+  }, [])
+
+  useEffect(() => {
+    if (!pending) return
+    // Capture phase on the window, stopped here: pages close their own dialogs on Escape
+    // from a window listener, and Escape on this box must not also close the one under it.
+    const handler = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      event.stopPropagation()
+      answer(false)
+    }
+    window.addEventListener('keydown', handler, true)
+    return () => window.removeEventListener('keydown', handler, true)
+  }, [pending, answer])
+
+  const tone = pending?.options.tone ?? 'default'
+  const Icon = tone === 'danger' ? AlertTriangle : tone === 'cost' ? Coins : CircleHelp
+  return (
+    <ConfirmContext.Provider value={confirm}>
+      {children}
+      {pending && (
+        <div className="modal-backdrop stacked confirm-backdrop" onMouseDown={() => answer(false)}>
+          <div className={`modal modal-narrow confirm-dialog ${tone}`} onMouseDown={(event) => event.stopPropagation()}>
+            <div className={`modal-icon ${tone === 'danger' ? 'danger-icon' : ''}`}><Icon /></div>
+            <h2>{pending.options.title}</h2>
+            <div className="confirm-body">{pending.options.body}</div>
+            <div className="modal-actions">
+              {/* Something hard to undo opens on Cancel, so Enter does the safe thing. */}
+              <button type="button" className="button ghost" onClick={() => answer(false)} data-dialog-focus={tone === 'danger' ? '' : undefined}>
+                {pending.options.cancelLabel ?? 'Cancel'}
+              </button>
+              <button type="button" className={`button ${tone === 'danger' ? 'danger' : 'primary'}`} onClick={() => answer(true)} data-dialog-focus={tone === 'danger' ? undefined : ''}>
+                {pending.options.confirmLabel}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </ConfirmContext.Provider>
+  )
+}
+
+export const useConfirm = () => useContext(ConfirmContext)
+
+
+/** Roles whose holders a bulk role change must leave alone: chips for what is picked, then a
+ *  filterable list. Shared by Give role and the low-activity purge, so both behave the same. */
+export function RoleExclusionPicker({ roles, value, onChange, disabled }: {
+  roles: DiscordRole[]
+  value: string[]
+  onChange: (next: string[]) => void
+  disabled?: boolean
+}) {
+  const [search, setSearch] = useState('')
+  const picked = roles.filter((role) => value.includes(role.id))
+  const visible = roles.filter((role) => role.name.toLowerCase().includes(search.trim().toLowerCase()))
+  const boosterNote = (role: DiscordRole) => role.booster && !/boost/i.test(role.name)
+  return (
+    <fieldset className="exclude-roles" disabled={disabled}>
+      <legend>Leave alone anyone who has one of these roles</legend>
+      <p className="field-hint">Checked live at the moment you apply, so a role given after the preview still counts. Server Booster is on by default.</p>
+      {picked.length > 0 && <ul className="role-chips">{picked.map((role) => <li key={role.id}><button type="button" onClick={() => onChange(value.filter((id) => id !== role.id))} aria-label={`Stop leaving ${role.name} alone`}>{role.name}{boosterNote(role) ? ' · booster' : ''}<X size={13} /></button></li>)}</ul>}
+      <label className="role-search"><Search size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={`Search ${roles.length} roles`} /></label>
+      <div className="role-options" role="group" aria-label="Roles to leave alone">
+        {visible.map((role) => <label key={role.id}><input type="checkbox" checked={value.includes(role.id)} onChange={(event) => onChange(event.target.checked ? [...value, role.id] : value.filter((id) => id !== role.id))} /><span>{role.name}{boosterNote(role) ? <em>Server Booster</em> : null}</span></label>)}
+        {visible.length === 0 && <p className="field-hint">No role matches that.</p>}
+      </div>
+    </fieldset>
+  )
+}
+
+
+/** A quiet pointer to the section of How it works that explains the thing next to it. */
+export function HelpLink({ topic, label = 'How this works' }: { topic: string; label?: string }) {
+  return <a className="help-link" href={`#help?topic=${topic}`}><CircleHelp size={13} aria-hidden="true" />{label}</a>
+}
+
+
+export type MenuItem = {
+  label: string
+  hint?: string
+  icon?: ReactNode
+  onSelect?: () => void
+  href?: string
+  disabled?: boolean
+}
+
+/** Less frequent actions behind one button, so a page header shows only what is used weekly.
+ *  Arrow keys move, Escape closes and hands focus back, a click outside closes. */
+export function ToolsMenu({ label = 'More tools', items }: { label?: string; items: MenuItem[] }) {
+  const [open, setOpen] = useState(false)
+  const root = useRef<HTMLDivElement>(null)
+  const trigger = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const first = root.current?.querySelector<HTMLElement>('[role="menuitem"]:not([aria-disabled="true"])')
+    first?.focus()
+    const onPointer = (event: MouseEvent) => { if (!root.current?.contains(event.target as Node)) setOpen(false) }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.stopPropagation(); setOpen(false); trigger.current?.focus(); return }
+      if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
+      const entries = [...(root.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not([aria-disabled="true"])') ?? [])]
+      if (!entries.length) return
+      event.preventDefault()
+      const at = entries.indexOf(document.activeElement as HTMLElement)
+      const next = event.key === 'ArrowDown' ? (at + 1) % entries.length : (at - 1 + entries.length) % entries.length
+      entries[next].focus()
+    }
+    document.addEventListener('mousedown', onPointer)
+    window.addEventListener('keydown', onKey, true)
+    return () => { document.removeEventListener('mousedown', onPointer); window.removeEventListener('keydown', onKey, true) }
+  }, [open])
+
+  return (
+    <div className="tools-menu" ref={root}>
+      <button ref={trigger} type="button" className="button" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <Ellipsis size={17} /> {label}
+      </button>
+      {open && (
+        <div className="tools-menu-list" role="menu" aria-label={label}>
+          {items.map((item) => {
+            const content = <>{item.icon}<span>{item.label}{item.hint && <small>{item.hint}</small>}</span></>
+            return item.href
+              ? <a key={item.label} role="menuitem" href={item.href} aria-disabled={item.disabled || undefined} onClick={() => setOpen(false)}>{content}</a>
+              : <button key={item.label} type="button" role="menuitem" aria-disabled={item.disabled || undefined} onClick={() => { if (item.disabled) return; setOpen(false); item.onSelect?.() }}>{content}</button>
+          })}
+        </div>
+      )}
+    </div>
+  )
 }

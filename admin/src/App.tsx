@@ -5,6 +5,7 @@ import {
   BookOpenCheck,
   Bot,
   ChartNoAxesColumnIncreasing,
+  CircleHelp,
   CircleGauge,
   LoaderCircle,
   LogOut,
@@ -20,7 +21,7 @@ import {
 import useSWR from 'swr'
 import { api, formatDate, formatUsd, mutateApi, type ApiError } from './api'
 import type { Overview, Session } from './types'
-import { PageErrorBoundary } from './components'
+import { ConfirmProvider, PageErrorBoundary, useConfirm } from './components'
 import OverviewPage from './pages/OverviewPage'
 import MembersPage from './pages/MembersPage'
 import PostsPage from './pages/PostsPage'
@@ -42,6 +43,7 @@ const ActivityPage = lazyPage(() => import('./pages/ActivityPage'))
 const AuditPage = lazyPage(() => import('./pages/AuditPage'))
 const ScansPage = lazyPage(() => import('./pages/ScansPage'))
 const LowActivityPage = lazyPage(() => import('./pages/LowActivityPage'))
+const HelpPage = lazyPage(() => import('./pages/HelpPage'))
 
 const routes = [
   { id: 'overview', label: 'Overview', icon: CircleGauge },
@@ -52,6 +54,7 @@ const routes = [
   { id: 'scans', label: 'Scan reports', icon: ScrollText },
   { id: 'scoring', label: 'Scoring rules', icon: Settings2 },
   { id: 'audit', label: 'Audit trail', icon: BookOpenCheck },
+  { id: 'help', label: 'How it works', icon: CircleHelp },
 ] as const
 
 type RouteId = (typeof routes)[number]['id']
@@ -95,7 +98,9 @@ function Shell({ session, children }: { session: Session; children: ReactNode })
     setMobileOpen(false)
   }
 
+  const confirm = useConfirm()
   const logout = async () => {
+    if (!(await confirm({ title: 'Sign out?', body: 'You will need to sign in with Discord again to get back in. A scan that is running keeps running.', confirmLabel: 'Sign out' }))) return
     await mutateApi('/api/logout', session.csrf_token, 'POST')
     window.location.reload()
   }
@@ -106,7 +111,8 @@ function Shell({ session, children }: { session: Session; children: ReactNode })
       case 'activity': return <ActivityPage session={session} />
       case 'posts': return <PostsPage session={session} />
       case 'scans': return <ScansPage />
-      case 'low-activity': return <LowActivityPage />
+      case 'low-activity': return <LowActivityPage session={session} />
+      case 'help': return <HelpPage />
       case 'scoring': return <ScoringPage session={session} />
       case 'audit': return <AuditPage />
       default: return <OverviewPage session={session} />
@@ -180,14 +186,25 @@ function Shell({ session, children }: { session: Session; children: ReactNode })
  *  dialog needs: a name, a focus trap, and the focus back where it came from. */
 function useDialogBehaviour() {
   useEffect(() => {
-    let restoreTo: HTMLElement | null = null
+    // Dialogs can now stack: a confirmation opens over the dialog that asked for it. Each one
+    // remembers where focus was when it opened, and gets it back when it closes.
+    const opened = new Map<HTMLElement, HTMLElement | null>()
     const focusable = (root: HTMLElement) => [...root.querySelectorAll<HTMLElement>(
       'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
     )].filter((el) => el.offsetParent !== null)
 
+    /** The dialog on top: a confirmation, then any stacked dialog, then the last one opened. */
+    const topDialog = () => {
+      for (const selector of ['.confirm-backdrop .modal', '.modal-backdrop.stacked .modal', '.modal-backdrop .modal']) {
+        const found = document.querySelectorAll<HTMLElement>(selector)
+        if (found.length) return found[found.length - 1]
+      }
+      return null
+    }
+
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Tab') return
-      const dialog = document.querySelector<HTMLElement>('.modal-backdrop .modal')
+      const dialog = topDialog()
       if (!dialog) return
       const items = focusable(dialog)
       if (!items.length) return
@@ -195,30 +212,33 @@ function useDialogBehaviour() {
       const last = items[items.length - 1]
       const active = document.activeElement as HTMLElement | null
       if (event.shiftKey && (active === first || !dialog.contains(active))) { event.preventDefault(); last.focus() }
-      else if (!event.shiftKey && active === last) { event.preventDefault(); first.focus() }
+      else if (!event.shiftKey && (active === last || !dialog.contains(active))) { event.preventDefault(); first.focus() }
     }
 
     const sync = () => {
-      const dialog = document.querySelector<HTMLElement>('.modal-backdrop .modal')
-      if (dialog) {
-        if (!dialog.getAttribute('role')) {
-          restoreTo = document.activeElement as HTMLElement | null
-          dialog.setAttribute('role', 'dialog')
-          dialog.setAttribute('aria-modal', 'true')
-          const heading = dialog.querySelector('h2')
-          if (heading) {
-            if (!heading.id) heading.id = `dialog-title-${Math.random().toString(36).slice(2, 8)}`
-            dialog.setAttribute('aria-labelledby', heading.id)
-          }
-          const preferred = dialog.querySelector<HTMLElement>('[data-dialog-focus]')
-          if (!dialog.contains(document.activeElement)) (preferred ?? focusable(dialog)[0] ?? dialog).focus()
-        }
-        document.body.style.overflow = 'hidden'
-      } else {
-        document.body.style.overflow = ''
+      const present = new Set(document.querySelectorAll<HTMLElement>('.modal-backdrop .modal'))
+      for (const [dialog, restoreTo] of [...opened]) {
+        if (present.has(dialog)) continue
+        opened.delete(dialog)
         if (restoreTo?.isConnected) restoreTo.focus()
-        restoreTo = null
       }
+      for (const dialog of present) {
+        if (opened.has(dialog)) continue
+        opened.set(dialog, document.activeElement as HTMLElement | null)
+        dialog.setAttribute('role', dialog.classList.contains('confirm-dialog') ? 'alertdialog' : 'dialog')
+        dialog.setAttribute('aria-modal', 'true')
+        const heading = dialog.querySelector('h2')
+        if (heading) {
+          if (!heading.id) heading.id = `dialog-title-${Math.random().toString(36).slice(2, 8)}`
+          dialog.setAttribute('aria-labelledby', heading.id)
+        }
+      }
+      const top = topDialog()
+      if (top && !top.contains(document.activeElement)) {
+        const preferred = top.querySelector<HTMLElement>('[data-dialog-focus]')
+        ;(preferred ?? focusable(top)[0] ?? top).focus()
+      }
+      document.body.style.overflow = present.size ? 'hidden' : ''
     }
 
     const observer = new MutationObserver(sync)
@@ -240,5 +260,5 @@ export default function App() {
   }
   if (error?.status === 401 || error?.status === 403 || !data) return <Login />
   if (error) return <div className="fatal"><h1>Console unavailable</h1><p>{error.message}</p></div>
-  return <Shell session={data}><span /></Shell>
+  return <ConfirmProvider><Shell session={data}><span /></Shell></ConfirmProvider>
 }

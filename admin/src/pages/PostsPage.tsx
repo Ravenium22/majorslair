@@ -2,7 +2,7 @@ import { useMemo, useState, type FormEvent } from 'react'
 import { ExternalLink, PauseCircle, Plus, Radar, Search, ToggleLeft, ToggleRight } from 'lucide-react'
 import useSWR from 'swr'
 import { api, formatCount, formatDate, mutateApi } from '../api'
-import { Empty, Loading, PageHeader, Pagination, Toast, useEscape } from '../components'
+import { Empty, Loading, PageHeader, Pagination, Toast, useConfirm, useEscape } from '../components'
 import type { Session, TrackedPost } from '../types'
 
 export default function PostsPage({ session }: { session: Session }) {
@@ -30,10 +30,16 @@ export default function PostsPage({ session }: { session: Session }) {
   useEscape(showAdd, () => setShowAdd(false))
   useEscape(Boolean(confirmPause), () => setConfirmPause(undefined))
   const [notice, setNotice] = useState<{ text: string; kind: 'success' | 'error' | 'loading' }>()
+  const confirm = useConfirm()
 
   const add = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const url = String(new FormData(event.currentTarget).get('url'))
+    if (!(await confirm({
+      title: 'Track this post?',
+      body: 'Its replies, quotes and retweets count towards scoring from the next scan on. The post is checked on X first, and only posts by the two tracked accounts are accepted.',
+      confirmLabel: 'Track post',
+    }))) return
     setNotice({ text: 'Verifying X post…', kind: 'loading' })
     try {
       await mutateApi('/api/tracked-posts', session.csrf_token, 'POST', { url })
@@ -45,6 +51,11 @@ export default function PostsPage({ session }: { session: Session }) {
 
   const toggle = async (post: TrackedPost) => {
     setConfirmPause(undefined)
+    if (!post.active && !(await confirm({
+      title: 'Resume tracking this post?',
+      body: `Post ${post.tweet_id} from @${post.source_handle} is back in every scan from the next one on, and engagement on it counts again.`,
+      confirmLabel: 'Resume tracking',
+    }))) return
     try {
       await mutateApi(`/api/tracked-posts/${post.tweet_id}`, session.csrf_token, 'PATCH', { active: !post.active })
       setNotice({ text: post.active ? `Paused. Post ${post.tweet_id} is out of every future scan until you resume it.` : `Resumed. Post ${post.tweet_id} is back in the scan scope.`, kind: 'success' })

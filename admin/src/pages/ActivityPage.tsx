@@ -2,7 +2,7 @@ import { useMemo, useState, type FormEvent } from 'react'
 import { ExternalLink, Search, Stethoscope } from 'lucide-react'
 import useSWR from 'swr'
 import { api, formatDate, formatScore, mutateApi } from '../api'
-import { Empty, Loading, PageHeader, Pagination, SortTh, Toast, useEscape } from '../components'
+import { Empty, HelpLink, Loading, PageHeader, Pagination, SortTh, Toast, useConfirm, useEscape } from '../components'
 import type { Action, Diagnosis, Paginated, Session } from '../types'
 
 export default function ActivityPage({ session }: { session: Session }) {
@@ -14,6 +14,7 @@ export default function ActivityPage({ session }: { session: Session }) {
   const [diagnosing, setDiagnosing] = useState(false)
   const [diagnosis, setDiagnosis] = useState<Diagnosis>()
   const [notice, setNotice] = useState<{ text: string; kind: 'success' | 'error' }>()
+  const confirm = useConfirm()
   const query = useMemo(() => new URLSearchParams({ search, action_type: type, sort, page: String(page), page_size: '35' }).toString(), [search, type, sort, page])
   const sortBy = (next: string) => { setSort(next); setPage(1) }
   const { data, isLoading } = useSWR<Paginated<Action>>(`/api/actions?${query}`, api)
@@ -24,6 +25,12 @@ export default function ActivityPage({ session }: { session: Session }) {
     event.preventDefault()
     const url = String(new FormData(event.currentTarget).get('url') ?? '').trim()
     if (!url) return
+    if (!(await confirm({
+      title: 'Check this tweet on X?',
+      body: 'This looks the tweet up on X and works out why it did or did not score. It only reads, nothing is changed. It stops as soon as it finds the answer, so it usually costs a fraction of a cent and never more than about $0.07.',
+      confirmLabel: 'Check the tweet',
+      tone: 'cost',
+    }))) return
     setDiagnosing(true)
     setDiagnosis(undefined)
     try {
@@ -51,7 +58,7 @@ export default function ActivityPage({ session }: { session: Session }) {
     </section>
 
     {showDiagnose && <div className="modal-backdrop" onMouseDown={() => { if (!diagnosing) { setShowDiagnose(false); setDiagnosis(undefined) } }}><div className="modal modal-wide" onMouseDown={(e) => e.stopPropagation()}>
-      <div className="modal-icon"><Stethoscope /></div><h2>Why isn't this tweet counted?</h2>
+      <div className="modal-icon"><Stethoscope /></div><h2>Why isn't this tweet counted?</h2><HelpLink topic="diagnose" label="The reasons it can give" />
       <p>Paste the URL of a reply, quote or post. The bot checks whether the author is linked, whether the tweet is already in the log, what it would score today, and whether X actually shows it in the parent's reply list and in search. Costs a few credits.</p>
       <form onSubmit={diagnose} className="diagnose-form">
         <input name="url" placeholder="https://x.com/user/status/123456789" required autoFocus disabled={diagnosing} />
