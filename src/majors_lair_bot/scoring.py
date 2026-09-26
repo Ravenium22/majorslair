@@ -20,6 +20,7 @@ DEFAULT_CONFIG: dict[str, str] = {
     "max_mention_pages": "50",
     "max_reply_search_pages": "25",
     "member_timeline_pages": "0",
+    "protected_role_ids": "",
     "protected_role_names": "",
     "low_activity_threshold": "5",
     "newcomer_grace_days": "30",
@@ -83,9 +84,16 @@ CONFIG_DESCRIPTIONS: dict[str, str] = {
         "(this many pages of 20 tweets, replies included) and counts replies to the tracked "
         "accounts that X hides everywhere else. Costs about 300 credits per member per page."
     ),
+    "protected_role_ids": (
+        "The Discord roles that protect whoever holds them, picked from the server's own "
+        "list. Sync from Discord protects members who hold one and unprotects them when "
+        "they lose it. Picking stores the role itself, so renaming it in Discord changes "
+        "nothing here."
+    ),
     "protected_role_names": (
-        "Comma-separated Discord role names (for example Active Supporter, Builder). "
-        "Sync from Discord marks members holding any of them as protected."
+        "The older way to name protecting roles: comma-separated names typed by hand. A "
+        "name has to match the Discord role exactly, emoji included, and stops matching if "
+        "the role is renamed. Prefer picking roles above; this is still honoured."
     ),
     "sync_ignored_discord_ids": (
         "Comma-separated Discord user IDs that Sync from Discord will never register, even "

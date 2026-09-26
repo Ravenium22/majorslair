@@ -53,7 +53,7 @@ const SECTIONS: { id: string; title: string; body: ReactNode }[] = [
       <ol>
         <li>Registers anyone who is missing. Bots, and the Discord IDs on the <strong>sync_ignored_discord_ids</strong> list on Scoring rules, are skipped.</li>
         <li>Updates changed Discord handles and fills in join dates.</li>
-        <li>Sets protection from the roles listed in <strong>protected_role_names</strong>, in both directions: gaining one of those roles protects someone, losing it removes that protection.</li>
+        <li>Sets protection from the protecting roles picked on Scoring rules, in both directions: gaining one of those roles protects someone, losing it removes that protection.</li>
         <li>Marks anyone who is no longer in the server as inactive. Their points and history are kept.</li>
       </ol>
       <p>It never changes anything in Discord and uses no X credits. If Discord returns far fewer members than the registry holds, which is what a cut-short member list looks like, it deactivates nobody and says so.</p>
@@ -67,10 +67,11 @@ const SECTIONS: { id: string; title: string; body: ReactNode }[] = [
       <p>A protected member never appears on the low-activity report, and scans leave them out whenever <strong>skip protected members</strong> is ticked. Nothing about protection is visible in Discord.</p>
       <p>Protection comes from two places, and the member drawer says which:</p>
       <ul>
-        <li><strong>By a Discord role</strong>: holding one of the roles in <strong>protected_role_names</strong>. Sync owns this completely. Remove the role in Discord and the protection goes at the next sync.</li>
+        <li><strong>By a Discord role</strong>: holding one of the roles picked under <strong>Roles that protect whoever holds them</strong> on Scoring rules. Sync owns this completely. Remove the role in Discord and the protection goes at the next sync.</li>
         <li><strong>By hand</strong>: the Protect button, an edit, or the protected column of an imported sheet. Sync never touches it.</li>
       </ul>
-      <p>Role names must match exactly, emoji included: <em>Nucleus</em> and <em>Nucleus ✅</em> are different roles. When a configured name matches no role, the sync result tells you and suggests the closest ones.</p>
+      <p>Pick protecting roles from the list rather than typing their names. A picked role is stored as the role itself, so renaming it in Discord changes nothing. Names typed into <strong>protected_role_names</strong> still work but must match exactly, emoji and spelling included: <em>Nucleus</em> is not <em>Nucleus ✅</em>, and <em>Eternals</em> is not <em>Ethernals</em>. When a typed name matches no role, the sync result says so and suggests the closest ones.</p>
+      <p>If Discord will not return the server's roles during a sync, nobody's protection is changed that time.</p>
     </>,
   },
   {

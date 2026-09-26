@@ -27,6 +27,7 @@ from .database import (
 )
 from .discord_app import EngagementBot
 from .engagement import EngagementService
+from .roles import match_protected_roles, split_setting
 from .scoring import DEFAULT_CONFIG, ScoringRules
 from .settings import Settings
 from .twitter_client import TwitterApiClient, TwitterApiError
@@ -1139,47 +1140,37 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         guild_id = runtime.settings.discord_guild_id
         members = await _fetch_guild_members()
 
-        # Discord roles that mean "protected" (config: protected_role_names).
+        # Discord roles that mean "protected": picked roles (protected_role_ids) and, for
+        # older settings, typed names (protected_role_names).
         config_values = await runtime.repository.get_config()
-        wanted_roles = {
-            name.strip().lower()
-            for name in config_values.get("protected_role_names", "").split(",")
-            if name.strip()
-        }
+        wanted_ids = split_setting(config_values.get("protected_role_ids", ""))
+        wanted_names = split_setting(config_values.get("protected_role_names", ""))
         ignored_ids = {
             value.strip()
             for value in config_values.get("sync_ignored_discord_ids", "").split(",")
             if value.strip()
         }
         role_names: dict[str, str] = {}
-        server_role_names: list[str] = []
-        if wanted_roles:
+        unmatched_role_names: list[dict[str, Any]] = []
+        missing_role_ids: list[str] = []
+        # If protection is configured but the server's roles cannot be read, the matched set
+        # would come back empty and the pass below would unprotect everyone. Skip it instead.
+        roles_unreadable = False
+        if wanted_ids or wanted_names:
             roles_response = await runtime.http.get(
                 f"{DISCORD_API}/guilds/{guild_id}/roles", headers=headers
             )
-            if roles_response.status_code < 400:
-                for role in roles_response.json():
-                    if not isinstance(role, dict):
-                        continue
-                    name = str(role.get("name", ""))
-                    server_role_names.append(name)
-                    if name.lower() in wanted_roles:
-                        role_names[str(role["id"])] = str(role["name"])
-        # Role names are typed by hand and Discord names often carry an emoji, so a near miss
-        # like "Nucleus" against a real "Nucleus checkmark" protects nobody and says nothing.
-        matched_lower = {name.lower() for name in role_names.values()}
-        unmatched_role_names = [
-            {
-                "configured": wanted,
-                "did_you_mean": sorted(
-                    name
-                    for name in server_role_names
-                    if wanted and wanted in name.lower() and name.lower() not in matched_lower
-                )[:5],
-            }
-            for wanted in sorted(wanted_roles)
-            if wanted not in matched_lower
-        ]
+            if roles_response.status_code < 400 and isinstance(roles_response.json(), list):
+                matched = match_protected_roles(
+                    [r for r in roles_response.json() if isinstance(r, dict)],
+                    wanted_ids,
+                    wanted_names,
+                )
+                role_names = matched.roles
+                unmatched_role_names = matched.unmatched_names
+                missing_role_ids = matched.missing_ids
+            else:
+                roles_unreadable = True
 
         registry = {user.discord_user_id: user for user in await runtime.repository.list_users()}
         added: list[dict[str, str]] = []
@@ -1240,7 +1231,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 }
             )
 
-        protection = await runtime.repository.apply_role_protection(role_protection)
+        protection = (
+            {"gained": [], "lost": []}
+            if roles_unreadable
+            else await runtime.repository.apply_role_protection(role_protection)
+        )
         protected_by_role = protection["gained"]
         unprotected_by_role = protection["lost"]
 
@@ -1311,6 +1306,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "unprotected_by_role": unprotected_by_role,
             "protected_roles_configured": sorted(role_names.values()),
             "unmatched_role_names": unmatched_role_names,
+            "missing_role_ids": missing_role_ids,
+            "roles_unreadable": roles_unreadable,
             "left_server": left,
             "deactivated": deactivated,
             "back_in_server": back_in_server,

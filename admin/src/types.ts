@@ -191,6 +191,8 @@ export type DiscordSyncResponse = {
   protected_by_role: { discord_user_id: string; discord_username: string; roles: string }[]
   protected_roles_configured: string[]
   unmatched_role_names: { configured: string; did_you_mean: string[] }[]
+  missing_role_ids?: string[]
+  roles_unreadable?: boolean
   left_server: { discord_user_id: string; discord_username: string }[]
   deactivated: { discord_user_id: string; discord_username: string }[]
   back_in_server: { discord_user_id: string; discord_username: string }[]

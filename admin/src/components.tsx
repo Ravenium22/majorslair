@@ -218,11 +218,13 @@ export const useConfirm = () => useContext(ConfirmContext)
 
 /** Roles whose holders a bulk role change must leave alone: chips for what is picked, then a
  *  filterable list. Shared by Give role and the low-activity purge, so both behave the same. */
-export function RoleExclusionPicker({ roles, value, onChange, disabled }: {
+export function RoleExclusionPicker({ roles, value, onChange, disabled, legend, hint }: {
   roles: DiscordRole[]
   value: string[]
   onChange: (next: string[]) => void
   disabled?: boolean
+  legend?: string
+  hint?: string
 }) {
   const [search, setSearch] = useState('')
   const picked = roles.filter((role) => value.includes(role.id))
@@ -230,11 +232,11 @@ export function RoleExclusionPicker({ roles, value, onChange, disabled }: {
   const boosterNote = (role: DiscordRole) => role.booster && !/boost/i.test(role.name)
   return (
     <fieldset className="exclude-roles" disabled={disabled}>
-      <legend>Leave alone anyone who has one of these roles</legend>
-      <p className="field-hint">Checked live at the moment you apply, so a role given after the preview still counts. Server Booster is on by default.</p>
+      <legend>{legend ?? 'Leave alone anyone who has one of these roles'}</legend>
+      <p className="field-hint">{hint ?? 'Checked live at the moment you apply, so a role given after the preview still counts. Server Booster is on by default.'}</p>
       {picked.length > 0 && <ul className="role-chips">{picked.map((role) => <li key={role.id}><button type="button" onClick={() => onChange(value.filter((id) => id !== role.id))} aria-label={`Stop leaving ${role.name} alone`}>{role.name}{boosterNote(role) ? ' · booster' : ''}<X size={13} /></button></li>)}</ul>}
       <label className="role-search"><Search size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={`Search ${roles.length} roles`} /></label>
-      <div className="role-options" role="group" aria-label="Roles to leave alone">
+      <div className="role-options" role="group" aria-label={legend ?? 'Roles to leave alone'}>
         {visible.map((role) => <label key={role.id}><input type="checkbox" checked={value.includes(role.id)} onChange={(event) => onChange(event.target.checked ? [...value, role.id] : value.filter((id) => id !== role.id))} /><span>{role.name}{boosterNote(role) ? <em>Server Booster</em> : null}</span></label>)}
         {visible.length === 0 && <p className="field-hint">No role matches that.</p>}
       </div>
