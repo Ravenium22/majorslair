@@ -660,3 +660,7 @@ td.nowrap, .nowrap { white-space: nowrap; }
 /* A points column header is a label: muted, and aligned with the numbers under it. Only a
    header you sort by takes the accent. */
 th.score:not(.sortable) { color: var(--muted); text-align: right; }
+
+/* A rule group reached from the index flashes its border, so the eye lands on it. */
+.config-group { transition: border-color .6s; }
+.config-group.flash { border-color: var(--teal); }

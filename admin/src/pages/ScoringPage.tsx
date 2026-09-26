@@ -29,6 +29,24 @@ export default function ScoringPage({ session }: { session: Session }) {
   useEscape(showSave && !saving, () => setShowSave(false))
   useEffect(() => { if (data) setValues(Object.fromEntries(data.map((entry) => [entry.key, entry.value]))) }, [data])
   const entries = useMemo(() => new Map(data?.map((entry) => [entry.key, entry])), [data])
+  const jumpTo = (id: string) => {
+    const target = document.getElementById(id)
+    if (!target) return
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    target.classList.remove('flash')
+    void target.offsetWidth
+    target.classList.add('flash')
+  }
+  // Arriving with #scoring?section=… (a pasted link, or opened in a new tab) lands on it.
+  useEffect(() => {
+    const fromHash = () => {
+      const section = new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('section')
+      if (section) jumpTo(section)
+    }
+    fromHash()
+    window.addEventListener('hashchange', fromHash)
+    return () => window.removeEventListener('hashchange', fromHash)
+  }, [])
   // Protecting roles are picked from the server's own list, so a typo or a rename can no
   // longer leave them matching nothing, which happened with "Eternals" for "Ethernals".
   const { data: serverRoles, error: rolesError } = useSWR<{ roles: DiscordRole[]; bot_can_manage_roles: boolean }>('/api/discord/roles', api)
@@ -63,7 +81,7 @@ export default function ScoringPage({ session }: { session: Session }) {
     <PageHeader title="Scoring rules" copy="Tune point weights, quality bonuses, content filters, and safe scan limits without redeploying the bot." actions={<button className="button primary" onClick={() => setShowSave(true)} disabled={!changes.length} title={changes.length ? undefined : 'Nothing changed yet'}><Save size={17} /> {changes.length ? `Review ${changes.length} change${changes.length === 1 ? '' : 's'}` : 'No changes'}</button>} />
     {notice && <Toast message={notice.text} kind={notice.kind} />}
     <div className="callout"><AlertTriangle size={19} /><div><strong>Changes are immediate and audited.</strong><p>Saving recalculates every action in the current cycle. Historical snapshots remain unchanged. <HelpLink topic="points" label="How points are worked out" /></p></div></div>
-    <div className="config-layout"><aside className="config-index"><SlidersHorizontal /><strong>Rule groups</strong>{Object.keys(groups).map((group) => <a key={group} href={`#${group.toLowerCase().replaceAll(' ', '-')}`}>{group}</a>)}</aside><div className="config-groups">
+    <div className="config-layout"><aside className="config-index"><SlidersHorizontal /><strong>Rule groups</strong>{Object.keys(groups).map((group) => { const id = group.toLowerCase().replaceAll(' ', '-'); return <a key={group} href={`#scoring?section=${id}`} onClick={(e) => { if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; e.preventDefault(); window.history.replaceState(null, '', `#scoring?section=${id}`); jumpTo(id) }}>{group}</a> })}</aside><div className="config-groups">
       {Object.entries(groups).map(([group, keys]) => <section className="panel config-group" id={group.toLowerCase().replaceAll(' ', '-')} key={group}><div className="panel-head"><div><h2>{group}</h2></div><span>{keys.length} rules</span></div><div className="field-grid">{keys.map((key) => { const entry = entries.get(key); const long = key === 'blacklist' || key === 'reference_keywords'; if (key === 'protected_role_ids') return <div className="wide role-setting" key={key}>{serverRoles ? <RoleExclusionPicker roles={serverRoles.roles} value={splitIds(values[key])} onChange={(next) => setValues({ ...values, [key]: next.join(',') })} legend="Roles that protect whoever holds them" hint={entry?.description} /> : <p className="field-hint">{rolesError ? 'Could not load the server roles, so they cannot be picked right now. The roles already chosen still apply.' : 'Loading the server roles…'}</p>}{splitIds(values[key]).filter((id) => serverRoles && !serverRoles.roles.some((role) => role.id === id)).length > 0 && <p className="estimate-warning">A protecting role you picked has been deleted from the server, so it protects nobody. <button type="button" className="link-button" onClick={() => setValues({ ...values, protected_role_ids: splitIds(values.protected_role_ids).filter((id) => serverRoles?.roles.some((role) => role.id === id)).join(',') })}>Remove it</button></p>}</div>; return <label className={long ? 'wide' : ''} key={key}><span>{key.replaceAll('_', ' ')}</span>{long ? <textarea value={values[key] ?? ''} onChange={(e) => setValues({ ...values, [key]: e.target.value })} /> : BOOLEAN_KEYS.has(key) ? <select value={(values[key] ?? 'false').toLowerCase() === 'true' ? 'true' : 'false'} onChange={(e) => setValues({ ...values, [key]: e.target.value })}><option value="false">Off</option><option value="true">On</option></select> : <input value={values[key] ?? ''} onChange={(e) => setValues({ ...values, [key]: e.target.value })} inputMode={NUMERIC_KEYS.has(key) ? 'decimal' : undefined} />}<small>{entry?.description}</small></label> })}</div></section>)}
       <section className="danger-zone"><div><h2>Starting a new cycle</h2><p>Resetting the leaderboard now lives with the rest of the monthly round, on the Overview page.</p></div><a className="button" href="#overview">Go to Overview</a></section>
     </div></div>

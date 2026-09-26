@@ -96,7 +96,7 @@ function Shell({ session, children }: { session: Session; children: ReactNode })
   }, [])
 
   useEffect(() => {
-    if (route === 'help' && window.location.hash.includes('topic=')) return
+    if (/[?&](topic|section)=/.test(window.location.hash)) return
     window.scrollTo({ top: 0, behavior: 'auto' })
   }, [route])
 
