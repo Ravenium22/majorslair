@@ -34,6 +34,14 @@ function summarise(event: AuditEntry): string {
     case 'admin_member_protection_changed': return `${event.new_value === 'true' ? 'Protected' : 'Removed protection from'} ${who}.`
     case 'admin_member_toggled': return `${event.new_value === 'true' ? 'Reactivated' : 'Deactivated'} ${who}.`
     case 'tracked_post_toggled': return `${event.new_value === 'true' ? 'Resumed' : 'Paused'} tracking of post ${event.subject_discord_id || ''}.`.trim()
+    case 'twitter_linked': return `${who} linked ${event.new_value} for the first time. Nothing was on file before.`
+    case 'twitter_link_unchanged': return `${who} re-linked ${event.new_value}, the same handle already on file. Nothing changed.`
+    case 'twitter_link_changed': return d.link_status === 'renamed'
+      ? `${who} changed handle: ${event.old_value} → ${event.new_value}. Same X account, renamed on X.`
+      : `${who} switched X account: ${event.old_value} → ${event.new_value}. A different X account from the one on file.`
+    case 'admin_member_linked': return d.link_status === 'same'
+      ? `Re-linked ${who} to @${event.new_value}, the same handle already on file.`
+      : event.old_value ? `Linked ${who} to @${event.new_value}, replacing @${event.old_value}.` : `Linked ${who} to @${event.new_value}.`
     case 'admin_login': return 'Signed in to the dashboard.'
     case 'low_activity_report': return `Opened the low-activity report: ${n(d.items)} members at or below ${d.threshold ?? 'the threshold'}.`
     default: return event.event_type.replaceAll('_', ' ')

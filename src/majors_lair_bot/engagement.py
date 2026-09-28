@@ -35,6 +35,33 @@ from .utils import (
 LOGGER = logging.getLogger(__name__)
 
 
+def classify_link(
+    before_handle: str, before_user_id: str, new_handle: str, new_user_id: str
+) -> str:
+    """How a new X link compares with what was on file for that member.
+
+    new               nothing was on file
+    same              the same handle (case aside) and the same X account
+    renamed           the same X account, now under a different handle on X
+    different_account a different X account than the one on file
+    """
+    if not before_handle:
+        return "new"
+    if before_user_id and new_user_id and before_user_id != new_user_id:
+        return "different_account"
+    if before_handle.removeprefix("@").lower() != new_handle.removeprefix("@").lower():
+        return "renamed" if before_user_id else "different_account"
+    return "same"
+
+
+LINK_EVENT = {
+    "new": "twitter_linked",
+    "same": "twitter_link_unchanged",
+    "renamed": "twitter_link_changed",
+    "different_account": "twitter_link_changed",
+}
+
+
 class EngagementService:
     def __init__(self, repository: DatabaseRepository, twitter: TwitterApiClient) -> None:
         self.repository = repository
@@ -44,8 +71,11 @@ class EngagementService:
 
     async def link_user(
         self, *, discord_user_id: str, discord_username: str, handle: str
-    ) -> tuple[str, str, str]:
+    ) -> tuple[str, str, str, str]:
+        """Link a member to an X account. Returns (old handle, new handle, X user ID, status),
+        where status says how the link compares with what was on file (see classify_link)."""
         normalized = normalize_handle(handle)
+        before = await self.repository.get_user(discord_user_id)
         profile = await self.twitter.get_user_info(normalized)
         twitter_user_id, canonical_handle, _ = parse_twitter_user(profile)
         canonical_handle = canonical_handle or normalized
@@ -57,15 +87,27 @@ class EngagementService:
             twitter_handle=canonical_handle,
             twitter_user_id=twitter_user_id,
         )
+        # Every re-link used to be logged as a change, even with the very same handle, so the
+        # only way to know was to check it against a spreadsheet by hand.
+        status = classify_link(
+            before.twitter_handle if before else "",
+            before.twitter_user_id if before else "",
+            new_handle,
+            twitter_user_id,
+        )
         await self.repository.append_audit(
-            event_type="twitter_link_changed" if old_handle else "twitter_linked",
+            event_type=LINK_EVENT[status],
             actor_discord_id=discord_user_id,
             subject_discord_id=discord_user_id,
             old_value=f"@{old_handle}" if old_handle else "",
             new_value=f"@{new_handle}",
-            details={"twitter_user_id": twitter_user_id},
+            details={
+                "twitter_user_id": twitter_user_id,
+                "previous_twitter_user_id": before.twitter_user_id if before else "",
+                "link_status": status,
+            },
         )
-        return old_handle, new_handle, twitter_user_id
+        return old_handle, new_handle, twitter_user_id, status
 
     async def import_links(
         self,
@@ -117,7 +159,7 @@ class EngagementService:
                 if abort_message:
                     return {**result, "status": "failed", "message": abort_message}
                 try:
-                    old_handle, new_handle, _ = await self.link_user(
+                    old_handle, new_handle, _, _status = await self.link_user(
                         discord_user_id=discord_user_id,
                         discord_username=discord_username,
                         handle=normalized,

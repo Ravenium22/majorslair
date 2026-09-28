@@ -139,17 +139,28 @@ class EngagementCog(commands.Cog):
     @app_commands.guild_only()
     async def link_twitter(self, interaction: discord.Interaction, handle: str) -> None:
         await interaction.response.defer(ephemeral=True, thinking=True)
-        old_handle, new_handle, _ = await self.bot.service.link_user(
+        old_handle, new_handle, _, status = await self.bot.service.link_user(
             discord_user_id=str(interaction.user.id),
             discord_username=str(interaction.user),
             handle=handle,
         )
-        if old_handle and old_handle != new_handle:
-            message = f"Updated your linked X account from **@{old_handle}** to **@{new_handle}**."
-        else:
+        member = f"<@{interaction.user.id}>"
+        # The audit post says how the link compares with what was on file, so nobody has to
+        # check a spreadsheet to find out whether anything changed.
+        if status == "new":
             message = f"Linked your Discord account to **@{new_handle}**."
+            title, note, colour = "X linked, first time", f"{member} linked **@{new_handle}**. Nothing was on file before.", discord.Color.dark_teal()
+        elif status == "same":
+            message = f"Your linked X account is already **@{new_handle}**, so nothing changed."
+            title, note, colour = "X link unchanged", f"{member} re-linked **@{new_handle}**, the same handle already on file.", discord.Color.dark_grey()
+        elif status == "renamed":
+            message = f"Updated your linked X account from **@{old_handle}** to **@{new_handle}**."
+            title, note, colour = "X handle changed", f"{member}: **@{old_handle}** → **@{new_handle}**. Same X account, renamed on X.", discord.Color.orange()
+        else:
+            message = f"Updated your linked X account from **@{old_handle}** to **@{new_handle}**."
+            title, note, colour = "X account changed", f"{member}: **@{old_handle}** → **@{new_handle}**. This is a different X account from the one on file.", discord.Color.red()
         await interaction.followup.send(message, ephemeral=True)
-        await self.bot.audit("X link updated", f"<@{interaction.user.id}> → **@{new_handle}**")
+        await self.bot.audit(title, note, colour=colour)
 
     @app_commands.command(name="unlink-twitter", description="Deactivate your linked X account")
     @app_commands.guild_only()
@@ -748,7 +759,9 @@ class EngagementBot(commands.Bot):
         if self.user:
             LOGGER.info("Connected as %s (%s)", self.user, self.user.id)
 
-    async def audit(self, title: str, description: str) -> None:
+    async def audit(
+        self, title: str, description: str, *, colour: discord.Color | None = None
+    ) -> None:
         channel_id = self.settings.discord_audit_channel_id
         if not channel_id:
             return
@@ -765,7 +778,7 @@ class EngagementBot(commands.Bot):
         embed = discord.Embed(
             title=title,
             description=description,
-            color=discord.Color.dark_teal(),
+            color=colour or discord.Color.dark_teal(),
             timestamp=discord.utils.utcnow(),
         )
         try:

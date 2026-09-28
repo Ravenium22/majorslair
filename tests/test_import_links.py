@@ -411,3 +411,29 @@ def test_config_int_respects_zero_for_optional_paths() -> None:
     )
     assert EngagementService._config_int({"max_source_pages": "0"}, "max_source_pages") == 1
     assert EngagementService._config_int({"max_source_pages": "junk"}, "max_source_pages") == 50
+
+
+def test_classify_link_names_every_case() -> None:
+    from majors_lair_bot.engagement import classify_link
+
+    assert classify_link("", "", "alice", "1") == "new"
+    assert classify_link("alice", "1", "Alice", "1") == "same", "case is not a change"
+    assert classify_link("alice", "1", "alice_new", "1") == "renamed"
+    assert classify_link("alice", "1", "bob", "2") == "different_account"
+    assert classify_link("alice", "", "bob", "2") == "different_account", "no stored ID: a new handle is a new account"
+
+
+@pytest.mark.asyncio
+async def test_relinking_the_same_handle_is_logged_as_unchanged(repository: DatabaseRepository) -> None:
+    """Re-linking used to be logged as a change even when nothing had changed."""
+    service = EngagementService(repository, FakeTwitter({"alice": "100", "alice_2": "100", "bob": "200"}))
+
+    first = await service.link_user(discord_user_id="1", discord_username="a", handle="@Alice")
+    again = await service.link_user(discord_user_id="1", discord_username="a", handle="alice")
+    renamed = await service.link_user(discord_user_id="1", discord_username="a", handle="alice_2")
+    switched = await service.link_user(discord_user_id="1", discord_username="a", handle="bob")
+
+    assert [first[3], again[3], renamed[3], switched[3]] == ["new", "same", "renamed", "different_account"]
+    audit = await repository.paginated_audit(page_size=10)
+    kinds = [item["event_type"] for item in reversed(audit["items"])]
+    assert kinds == ["twitter_linked", "twitter_link_unchanged", "twitter_link_changed", "twitter_link_changed"]

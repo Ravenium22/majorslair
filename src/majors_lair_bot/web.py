@@ -907,7 +907,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/api/users/link")
     async def link_user(payload: LinkUserRequest, admin: MutatingAdmin) -> dict[str, str]:
-        old_handle, handle, twitter_id = await runtime.service.link_user(
+        old_handle, handle, twitter_id, status = await runtime.service.link_user(
             discord_user_id=payload.discord_user_id,
             discord_username=payload.discord_username,
             handle=payload.twitter_handle,
@@ -918,8 +918,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             subject_discord_id=payload.discord_user_id,
             old_value=old_handle,
             new_value=handle,
+            details={"link_status": status},
         )
-        return {"twitter_handle": handle, "twitter_user_id": twitter_id}
+        return {"twitter_handle": handle, "twitter_user_id": twitter_id, "link_status": status}
 
     @app.post("/api/users/import")
     async def import_users(payload: ImportRequest, admin: MutatingAdmin) -> dict[str, Any]:
