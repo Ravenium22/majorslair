@@ -699,3 +699,12 @@ th.score:not(.sortable) { color: var(--muted); text-align: right; }
 .reply-cell { max-width: 360px; white-space: normal !important; }
 .reply-cell a { color: var(--text); font-size: 13px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 @media (max-width: 1000px) { .raffle-body { grid-template-columns: 1fr; } }
+
+/* Raffle picker */
+.raffle-picker input { max-width: 140px; font-size: 18px; }
+.error-hint { color: #e0a9a3; }
+.winner-list { margin: 4px 0 14px; padding-left: 26px; }
+.winner-list li { padding: 8px 0; border-bottom: 1px solid var(--line-soft); font-size: 16px; }
+.winner-list li::marker { color: var(--amber); font-weight: 650; }
+.winner-list li a { font-weight: 600; }
+.winner-list small { display: block; margin-top: 3px; color: var(--muted); font-size: 12px; }

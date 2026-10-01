@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Check, Copy, Download, Minus, Plus, Ticket, X } from 'lucide-react'
+import { Check, Copy, Dices, Download, Minus, Plus, Ticket, Trophy, X } from 'lucide-react'
 import useSWR from 'swr'
 import { api, formatCount, formatDate, formatUsd, mutateApi } from '../api'
-import { Empty, HelpLink, PageHeader, Toast, useConfirm } from '../components'
+import { Empty, HelpLink, PageHeader, Toast, useConfirm, useEscape } from '../components'
 import type { ConfigEntry, Session } from '../types'
 
 type Post = { tweet_id: string; author: string; text: string; created_at: string; reply_count: number; retweet_count: number; url: string }
@@ -143,6 +143,38 @@ export default function RafflePage({ session }: { session: Session }) {
     anchor.click()
     URL.revokeObjectURL(url)
   }
+  // ---- 4. Pick winners -----------------------------------------------------------------------
+  // The draw happens on the server and every draw is logged, redraws included, so a result
+  // can be shown to anyone and never quietly replaced.
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [howMany, setHowMany] = useState('1')
+  const [drawing, setDrawing] = useState(false)
+  const [draw, setDraw] = useState<{ winners: string[]; pool_size: number; drawn_at: string }>()
+  const eligible = outcome ? outcome.rows.filter((row) => row.verdict === 'passes').map((row) => row.handle) : []
+  const wanted = Number(howMany)
+  const wantedValid = Number.isInteger(wanted) && wanted >= 1 && wanted <= eligible.length
+  useEscape(pickerOpen && !drawing, () => setPickerOpen(false))
+  const openPicker = () => { setDraw(undefined); setHowMany('1'); setPickerOpen(true) }
+  const runDraw = async (again: boolean) => {
+    if (!wantedValid) return
+    if (again && !(await confirm({
+      title: 'Draw again?',
+      body: 'The first draw stays in the Audit trail with its winners, so anyone can see there were two draws.',
+      confirmLabel: 'Draw again',
+      tone: 'danger',
+    }))) return
+    setDrawing(true)
+    try {
+      setDraw(await mutateApi<{ winners: string[]; pool_size: number; drawn_at: string }>('/api/tools/raffle/draw', session.csrf_token, 'POST', { pool: eligible, count: wanted, post_url: post?.url ?? '' }))
+    } catch (err) { setNotice({ text: err instanceof Error ? err.message : 'The draw failed', kind: 'error' }) }
+    finally { setDrawing(false) }
+  }
+  const copyWinners = async () => {
+    if (!draw) return
+    try { await navigator.clipboard.writeText(draw.winners.map((w) => `@${w}`).join('\n')); setNotice({ text: `Copied ${draw.winners.length} winner${draw.winners.length === 1 ? '' : 's'}.`, kind: 'success' }) }
+    catch { setNotice({ text: 'Could not copy to the clipboard.', kind: 'error' }) }
+  }
+
   const mark = (value: boolean | null) => value === null ? <span className="muted"><Minus size={14} /> Not found</span> : value ? <span className="follow-yes"><Check size={14} /> Yes</span> : <span className="follow-no"><X size={14} /> No</span>
 
   return <div className="page">
@@ -194,6 +226,7 @@ export default function RafflePage({ session }: { session: Session }) {
       <div className="panel-head"><div><h2>{outcome.passes} of {outcome.checked} pass</h2></div><span>{formatUsd(outcome.credits)} spent</span></div>
       <div className="toolbar">
         <div className="segmented">{(['all', 'passes', 'missing', 'check'] as const).map((key) => <button key={key} className={show === key ? 'active' : ''} aria-pressed={show === key} onClick={() => setShow(key)}>{key === 'all' ? `All ${outcome.checked}` : key === 'passes' ? `Passes ${outcome.passes}` : key === 'missing' ? `Missing something ${handlesWith('missing').length}` : `Check by hand ${outcome.to_check}`}</button>)}</div>
+        <button className="button primary" onClick={openPicker} disabled={!outcome.passes} title={outcome.passes ? undefined : 'Nobody passed, so there is nobody to draw from'}><Dices size={15} /> Pick winners</button>
         <button className="button" onClick={() => copy('passes')} disabled={!outcome.passes}><Copy size={15} /> Copy who passes</button>
         <button className="button" onClick={download}><Download size={15} /> Download CSV</button>
       </div>
@@ -211,5 +244,21 @@ export default function RafflePage({ session }: { session: Session }) {
         })}
       </tbody></table></div> : <Empty title="Nobody here" copy="Nobody in the list falls into this group." />}
     </section>}
+
+    {pickerOpen && outcome && <div className="modal-backdrop" onMouseDown={() => { if (!drawing) setPickerOpen(false) }}><div className="modal raffle-picker" onMouseDown={(e) => e.stopPropagation()}>
+      <div className="modal-icon">{draw ? <Trophy /> : <Dices />}</div>
+      {!draw ? <>
+        <h2>Pick winners</h2>
+        <p>Drawn at random from the <strong>{eligible.length}</strong> entrant{eligible.length === 1 ? '' : 's'} who pass.{outcome.to_check ? <> The {outcome.to_check} marked Check by hand are not in the draw; check them first if they should be.</> : null} Every draw is saved in the Audit trail.</p>
+        <label>How many winners?<input autoFocus type="text" inputMode="numeric" pattern="[0-9]*" value={howMany} onChange={(e) => setHowMany(e.target.value.replace(/[^0-9]/g, '').slice(0, 3))} onKeyDown={(e) => { if (e.key === 'Enter' && wantedValid) void runDraw(false) }} disabled={drawing} /></label>
+        {howMany !== '' && !wantedValid && <p className="field-hint error-hint">{wanted < 1 ? 'Pick at least one winner.' : `There are only ${eligible.length} entrant${eligible.length === 1 ? '' : 's'} who pass.`}</p>}
+        <div className="modal-actions"><button className="button ghost" onClick={() => setPickerOpen(false)} disabled={drawing}>Cancel</button><button className="button primary" onClick={() => void runDraw(false)} disabled={drawing || !wantedValid}><Dices size={16} /> {drawing ? 'Drawing…' : 'Raffle'}</button></div>
+      </> : <>
+        <h2>{draw.winners.length === 1 ? 'The winner' : `The ${draw.winners.length} winners`}</h2>
+        <ol className="winner-list">{draw.winners.map((handle) => <li key={handle}><a href={`https://x.com/${handle}`} target="_blank" rel="noreferrer">@{handle}</a>{replies[handle.toLowerCase()]?.reply && <small>{replies[handle.toLowerCase()].reply}</small>}</li>)}</ol>
+        <p className="field-hint">Drawn from {draw.pool_size} eligible entrant{draw.pool_size === 1 ? '' : 's'} on {formatDate(draw.drawn_at)}. Saved in the Audit trail.</p>
+        <div className="modal-actions"><button className="button ghost" onClick={() => void runDraw(true)} disabled={drawing}>{drawing ? 'Drawing…' : 'Draw again'}</button><button className="button" onClick={copyWinners}><Copy size={15} /> Copy winners</button><button className="button primary" onClick={() => setPickerOpen(false)}>Done</button></div>
+      </>}
+    </div></div>}
   </div>
 }

@@ -131,3 +131,24 @@ async def test_retweet_requirement_never_guesses_from_a_short_list(repository: D
     assert rows["ana"]["verdict"] == "passes"
     assert rows["ben"]["retweeted"] is None and rows["ben"]["verdict"] == "check"
     assert out["passes"] == 1 and out["to_check"] == 1
+
+
+def test_draw_picks_distinct_winners_fairly() -> None:
+    from collections import Counter
+    from random import Random
+
+    from majors_lair_bot.raffle import draw_winners
+
+    pool = ["a", "b", "c", "d", "a"]  # a duplicate entry does not double a chance
+    winners = draw_winners(pool, 3, Random(1))
+    assert len(winners) == 3 and len(set(winners)) == 3 and set(winners) <= {"a", "b", "c", "d"}
+
+    rng = Random(7)
+    tally = Counter(draw_winners(pool, 1, rng)[0] for _ in range(20000))
+    assert set(tally) == {"a", "b", "c", "d"}
+    assert all(4300 < n < 5700 for n in tally.values()), tally  # each about a quarter
+
+    with pytest.raises(ValueError, match="only 4 eligible"):
+        draw_winners(pool, 5)
+    with pytest.raises(ValueError):
+        draw_winners(pool, 0)

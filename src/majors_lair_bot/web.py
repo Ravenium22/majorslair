@@ -27,11 +27,12 @@ from .database import (
 )
 from .discord_app import EngagementBot
 from .engagement import EngagementService
+from .raffle import draw_winners
 from .roles import clean_handles, match_protected_roles, split_setting
 from .scoring import DEFAULT_CONFIG, ScoringRules
 from .settings import Settings
 from .twitter_client import TwitterApiClient, TwitterApiError
-from .utils import parse_bool, parse_datetime, parse_period, utc_now
+from .utils import isoformat, parse_bool, parse_datetime, parse_period, utc_now
 
 LOGGER = logging.getLogger(__name__)
 DISCORD_API = "https://discord.com/api/v10"
@@ -148,6 +149,12 @@ class HandleFollowRequest(BaseModel):
     handles: list[str] = Field(min_length=1, max_length=500)
     accounts: list[str] = Field(min_length=1, max_length=5)
     retweet_url: str = ""
+
+
+class RaffleDrawRequest(BaseModel):
+    pool: list[str] = Field(min_length=1, max_length=500)
+    count: int = Field(ge=1, le=500)
+    post_url: str = Field(default="", max_length=300)
 
 
 class RaffleParticipantsRequest(BaseModel):
@@ -892,6 +899,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post("/api/tools/raffle/draw")
+    async def raffle_draw(payload: RaffleDrawRequest, admin: MutatingAdmin) -> dict[str, Any]:
+        """Draw winners from the entrants who passed. Recorded in the audit trail every time,
+        so a draw can be shown afterwards and a redraw is visible as a second entry."""
+        pool = clean_handles(payload.pool)
+        try:
+            winners = draw_winners(pool, payload.count)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        drawn_at = isoformat()
+        await runtime.repository.append_audit(
+            event_type="raffle_drawn",
+            actor_discord_id=str(admin["discord_user_id"]),
+            details={
+                "winners": winners,
+                "count": len(winners),
+                "pool_size": len(pool),
+                "pool": pool,
+                "post_url": payload.post_url,
+                "drawn_at": drawn_at,
+            },
+        )
+        return {"winners": winners, "pool_size": len(pool), "drawn_at": drawn_at}
 
     @app.get("/api/tools/raffle/tweet")
     async def raffle_tweet(url: str, _: Admin) -> dict[str, Any]:
