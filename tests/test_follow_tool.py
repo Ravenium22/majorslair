@@ -63,3 +63,71 @@ def test_pasted_lists_are_cleaned() -> None:
 
     pasted = ["@Alice", "https://x.com/bob_1/status/9", "alice", "not a handle!", "twitter.com/Carol", ""]
     assert clean_handles(pasted) == ["Alice", "bob_1", "Carol"]
+
+
+def _raw(tweet_id: str, author: str, text: str, reply_to: str = "", minutes: int = 0) -> dict:
+    return {
+        "id": tweet_id, "text": text, "author": {"userName": author, "id": f"u-{author}"},
+        "createdAt": f"2026-09-30T12:{minutes:02d}:00Z", "inReplyToId": reply_to,
+        "replyCount": 3, "retweetCount": 2,
+    }
+
+
+class RaffleTwitter(FakeTwitter):
+    def __init__(self, *, retweeters: list[str], retweet_count: int, retweeters_complete: bool = True) -> None:
+        super().__init__(follows={("ana", "major"), ("ana", "proj"), ("ben", "major"), ("ben", "proj"), ("cy", "major")}, missing=set())
+        self.retweeters = retweeters
+        self.retweet_count = retweet_count
+        self.retweeters_complete = retweeters_complete
+
+    async def get_tweets(self, ids: list[str]):
+        from majors_lair_bot.twitter_client import parse_tweet
+        raw = _raw(ids[0], "major", "Raffle! Reply, follow, RT")
+        raw["retweetCount"] = self.retweet_count
+        return [parse_tweet(raw)]
+
+    async def get_replies(self, tweet_id: str, *, since, until, max_pages: int):
+        from majors_lair_bot.models import PageResult
+        return PageResult(items=[
+            _raw("r1", "ana", "done", tweet_id, 1),
+            _raw("r2", "ana", "again", tweet_id, 2),        # a second reply: still one entry
+            _raw("r3", "major", "good luck", tweet_id, 3),  # the author is not a participant
+            _raw("r4", "dan", "reply to ana", "r1", 4),     # replying to someone else
+        ], complete=True, pages=1)
+
+    async def search_conversation(self, tweet_id: str, *, max_pages: int):
+        from majors_lair_bot.models import PageResult
+        # X hid this reply from the list; only search finds it.
+        return PageResult(items=[_raw("r5", "ben", "in @x @y", tweet_id, 5), _raw("r1", "ana", "done", tweet_id, 1)], complete=True, pages=1)
+
+    async def get_retweeters(self, tweet_id: str, *, max_pages: int):
+        from majors_lair_bot.models import PageResult
+        return PageResult(items=[{"userName": name} for name in self.retweeters], complete=self.retweeters_complete, pages=1)
+
+
+@pytest.mark.asyncio
+async def test_participants_are_direct_replies_once_each_including_hidden_ones(repository: DatabaseRepository) -> None:
+    service = EngagementService(repository, RaffleTwitter(retweeters=[], retweet_count=0))
+    out = await service.raffle_participants(url="https://x.com/major/status/100", exclude=["proj"])
+    assert [p["handle"] for p in out["participants"]] == ["ana", "ben"]
+    assert out["participants"][0]["reply"] == "done", "the first reply is the one kept"
+    assert out["found_only_by_search"] == 1
+
+
+@pytest.mark.asyncio
+async def test_retweet_requirement_never_guesses_from_a_short_list(repository: DatabaseRepository) -> None:
+    # The list X returned is whole (as long as the retweet count): absence means no.
+    whole = EngagementService(repository, RaffleTwitter(retweeters=["ana", "cy"], retweet_count=2))
+    out = await whole.check_handles_follow(handles=["ana", "ben", "cy"], accounts=["major", "proj"], actor_discord_id="1", retweet_url="https://x.com/major/status/100")
+    rows = {row["handle"]: row for row in out["rows"]}
+    assert rows["ana"]["verdict"] == "passes"
+    assert rows["ben"]["retweeted"] is False and rows["ben"]["verdict"] == "missing"
+    assert rows["cy"]["verdict"] == "missing", "retweeted but does not follow both"
+
+    # X returned fewer retweeters than the post has: ben's absence proves nothing.
+    short = EngagementService(repository, RaffleTwitter(retweeters=["ana"], retweet_count=40))
+    out = await short.check_handles_follow(handles=["ana", "ben"], accounts=["major", "proj"], actor_discord_id="1", retweet_url="https://x.com/major/status/100")
+    rows = {row["handle"]: row for row in out["rows"]}
+    assert rows["ana"]["verdict"] == "passes"
+    assert rows["ben"]["retweeted"] is None and rows["ben"]["verdict"] == "check"
+    assert out["passes"] == 1 and out["to_check"] == 1

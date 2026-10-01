@@ -495,6 +495,16 @@ class TwitterApiClient:
             max_pages=max_pages,
         )
 
+    async def search_conversation(self, tweet_id: str, *, max_pages: int) -> PageResult:
+        """Every tweet in one post's conversation, via search. Catches the replies X hides
+        from the post's own reply list, which raffle entries ("done @a @b") often are."""
+        return await self._paginate(
+            "/twitter/tweet/advanced_search",
+            params={"query": f"conversation_id:{tweet_id}", "queryType": "Latest"},
+            item_key="tweets",
+            max_pages=max_pages,
+        )
+
     async def search_from_user(
         self, handle: str, *, since: datetime, until: datetime, max_pages: int
     ) -> list[Tweet]:

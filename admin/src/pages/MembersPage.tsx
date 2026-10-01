@@ -444,7 +444,6 @@ export default function MembersPage({ session }: { session: Session }) {
       <ToolsMenu items={[
         { label: verifying ? 'Checking X accounts…' : 'Verify X accounts', hint: 'Find suspended, deleted or renamed accounts', icon: <BadgeCheck size={16} />, onSelect: openVerify, disabled: verifying },
         { label: followBusy ? 'Checking follows…' : 'Check follows', hint: 'Who follows both tracked accounts', icon: <UserRoundSearch size={16} />, onSelect: openFollowCheck, disabled: followBusy },
-        { label: 'Check any X handles', hint: 'Raffle winners or anyone else: do they follow?', icon: <UserRoundSearch size={16} />, href: '#follow-checker' },
         { label: 'Import CSV', hint: 'Add or link members from a sheet', icon: <FileUp size={16} />, onSelect: () => setShowImport(true) },
         { label: 'Export CSV', hint: 'Download the list as filtered below', icon: <Download size={16} />, href: `/api/users/export?${filterQuery}` },
       ]} />

@@ -145,8 +145,14 @@ class MemberFilters(BaseModel):
 
 
 class HandleFollowRequest(BaseModel):
-    handles: list[str] = Field(min_length=1, max_length=200)
-    accounts: list[str] = Field(min_length=1, max_length=3)
+    handles: list[str] = Field(min_length=1, max_length=500)
+    accounts: list[str] = Field(min_length=1, max_length=5)
+    retweet_url: str = ""
+
+
+class RaffleParticipantsRequest(BaseModel):
+    url: str
+    exclude: list[str] = Field(default_factory=list, max_length=10)
 
 
 class RoleBulkRequest(BaseModel):
@@ -877,9 +883,33 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=422, detail="No valid X handles in the list")
         if not accounts:
             raise HTTPException(status_code=422, detail="Name at least one account to check against")
-        return await runtime.service.check_handles_follow(
-            handles=handles, accounts=accounts, actor_discord_id=str(admin["discord_user_id"])
-        )
+        try:
+            return await runtime.service.check_handles_follow(
+                handles=handles,
+                accounts=accounts,
+                actor_discord_id=str(admin["discord_user_id"]),
+                retweet_url=payload.retweet_url.strip(),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/api/tools/raffle/tweet")
+    async def raffle_tweet(url: str, _: Admin) -> dict[str, Any]:
+        """The raffle post, with its reply and retweet counts, before anything is fetched."""
+        try:
+            return await runtime.service.raffle_tweet(url)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post("/api/tools/raffle/participants")
+    async def raffle_participants(payload: RaffleParticipantsRequest, _: MutatingAdmin) -> dict[str, Any]:
+        """Everyone who replied to a post, for the raffle checker."""
+        try:
+            return await runtime.service.raffle_participants(
+                url=payload.url, exclude=clean_handles(payload.exclude)
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.get("/api/users/follow-estimate")
     async def follow_estimate(_: Admin) -> dict[str, Any]:

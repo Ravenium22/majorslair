@@ -23,6 +23,7 @@ from .twitter_client import (
     parse_twitter_user,
 )
 from .utils import (
+    deep_get,
     isoformat,
     normalize_handle,
     parse_bool,
@@ -708,8 +709,88 @@ class EngagementService:
             )
             return summary
 
+    async def raffle_tweet(self, url: str) -> dict[str, Any]:
+        """The raffle post itself, so the page can show it and estimate the cost first."""
+        tweet_id = parse_status_url(url)
+        tweets = await self.twitter.get_tweets([tweet_id])
+        if not tweets:
+            raise ValueError("That post was not found, or it is not public")
+        tweet = tweets[0]
+        return {
+            "tweet_id": tweet.tweet_id,
+            "author": tweet.author_handle,
+            "text": tweet.text,
+            "created_at": isoformat(tweet.created_at),
+            "reply_count": tweet.reply_count,
+            "retweet_count": tweet.retweet_count,
+            "url": tweet.url,
+        }
+
+    async def raffle_participants(
+        self, *, url: str, exclude: list[str], max_pages: int = 50
+    ) -> dict[str, Any]:
+        """Everyone who replied to a post, one row per person with their first reply.
+
+        Reads the post's reply list and also searches the conversation, because X hides
+        low-effort replies from the list and raffle entries often look exactly like that.
+        Only direct replies to the post count; the post's author and the accounts being
+        checked against are left out.
+        """
+        tweet_id = parse_status_url(url)
+        tweets = await self.twitter.get_tweets([tweet_id])
+        if not tweets:
+            raise ValueError("That post was not found, or it is not public")
+        post = tweets[0]
+        self.twitter.reset_usage()
+        since = post.created_at - timedelta(minutes=1)
+        listed = await self.twitter.get_replies(
+            tweet_id, since=since, until=utc_now(), max_pages=max_pages
+        )
+        try:
+            searched = await self.twitter.search_conversation(tweet_id, max_pages=max_pages)
+        except TwitterApiError as exc:
+            LOGGER.warning("conversation search failed for %s: %s", tweet_id, exc)
+            searched = None
+        skip = {handle.removeprefix("@").lower() for handle in exclude} | {post.author_handle.lower()}
+        people: dict[str, dict[str, Any]] = {}
+        from_search = 0
+        for source, page in (("list", listed), ("search", searched)):
+            if page is None:
+                continue
+            for item in page.items:
+                try:
+                    reply = parse_tweet(item)
+                except (ValueError, TypeError):
+                    continue
+                handle = reply.author_handle.lower()
+                if not handle or handle in skip or reply.reply_to_tweet_id != tweet_id:
+                    continue
+                if handle not in people:
+                    people[handle] = {
+                        "handle": reply.author_handle,
+                        "reply": reply.text,
+                        "replied_at": isoformat(reply.created_at),
+                        "reply_url": reply.url,
+                    }
+                    if source == "search":
+                        from_search += 1
+        participants = sorted(people.values(), key=lambda row: row["replied_at"])
+        return {
+            "tweet_id": tweet_id,
+            "author": post.author_handle,
+            "participants": participants,
+            "found_only_by_search": from_search,
+            "complete": bool(listed.complete and (searched is None or searched.complete)),
+            "credits": max(self.twitter.items_returned, self.twitter.request_count) * 15,
+        }
+
     async def check_handles_follow(
-        self, *, handles: list[str], accounts: list[str], actor_discord_id: str
+        self,
+        *,
+        handles: list[str],
+        accounts: list[str],
+        actor_discord_id: str,
+        retweet_url: str = "",
     ) -> dict[str, Any]:
         """Check whether arbitrary X handles follow the given accounts, for example raffle
         winners who may not be in the server at all.
@@ -720,6 +801,26 @@ class EngagementService:
         """
         semaphore = asyncio.Semaphore(4)
         self.twitter.reset_usage()
+
+        # A required retweet is checked against the post's retweeter list, read once. X does
+        # not always return every retweeter, so someone missing from a list that came back
+        # short of the retweet count is "not found" (check by hand), never a plain "no".
+        retweeters: set[str] | None = None
+        retweet_list_whole = False
+        retweet_post: dict[str, Any] | None = None
+        if retweet_url:
+            retweet_id = parse_status_url(retweet_url)
+            posts = await self.twitter.get_tweets([retweet_id])
+            if not posts:
+                raise ValueError("The post to retweet was not found, or it is not public")
+            page = await self.twitter.get_retweeters(retweet_id, max_pages=50)
+            retweeters = set()
+            for item in page.items:
+                name = deep_get(item, (("userName",), ("screen_name",), ("username",)), default="")
+                if name:
+                    retweeters.add(str(name).lower())
+            retweet_list_whole = page.complete and len(retweeters) >= posts[0].retweet_count
+            retweet_post = {"tweet_id": retweet_id, "retweet_count": posts[0].retweet_count, "retweeters_found": len(retweeters), "whole_list": retweet_list_whole}
 
         async def one(handle: str) -> dict[str, Any]:
             results: dict[str, bool | None] = {}
@@ -732,10 +833,22 @@ class EngagementService:
                     results[account] = None
                     error = str(exc)
             known = [value for value in results.values() if value is not None]
+            follows_all = bool(known) and len(known) == len(accounts) and all(known)
+            retweeted: bool | None = None
+            if retweeters is not None:
+                retweeted = True if handle.lower() in retweeters else (False if retweet_list_whole else None)
+            if error or (retweeters is not None and retweeted is None and follows_all):
+                verdict = "check"
+            elif follows_all and retweeted is not False:
+                verdict = "passes"
+            else:
+                verdict = "missing"
             return {
                 "handle": handle,
                 "results": results,
-                "follows_all": bool(known) and len(known) == len(accounts) and all(known),
+                "follows_all": follows_all,
+                "retweeted": retweeted,
+                "verdict": verdict,
                 "error": error,
             }
 
@@ -743,10 +856,14 @@ class EngagementService:
         summary = {
             "checked": len(rows),
             "follows_all": sum(1 for row in rows if row["follows_all"]),
+            "passes": sum(1 for row in rows if row["verdict"] == "passes"),
+            "to_check": sum(1 for row in rows if row["verdict"] == "check"),
             "errors": sum(1 for row in rows if row["error"]),
             "accounts": accounts,
+            "retweet": retweet_post,
             "calls": self.twitter.request_count,
-            "credits": self.twitter.request_count * 100,
+            # Follow lookups are 100 credits each; tweet and retweeter reads 15 per item.
+            "credits": sum(1 for row in rows for _ in accounts) * 100 + self.twitter.items_returned * 15,
         }
         await self.repository.append_audit(
             event_type="follow_list_checked",

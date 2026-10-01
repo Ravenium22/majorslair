@@ -100,7 +100,20 @@ const SECTIONS: { id: string; title: string; body: ReactNode }[] = [
     body: <>
       <p>Check follows, on the Members page, reads the follower list of each tracked account once and matches every linked member against it. That is one pass rather than one lookup per member, and it costs about a cent per thousand followers read. The cost is shown before it runs.</p>
       <p>A member is recorded as not following only when the whole follower list was read. If a list is too long to finish, anyone not found in it stays <strong>not checked</strong>, never marked as not following, so an incomplete read cannot get someone purged.</p>
-      <p><strong>Checking people who are not members</strong>, raffle winners for example: Members, More tools, <strong>Check any X handles</strong>. Paste the handles, name up to three accounts they must follow, and get a yes or no for each. It looks each pair up directly, which costs about a tenth of a cent per check, and it changes nothing in the bot. Do not change the tracked accounts on Scoring rules for this: saving them rescores the whole cycle against the new accounts.</p>
+      <p>To check people who are not members, such as raffle entrants, use the <a href="#help?topic=raffle">X raffle checker</a>. Do not change the tracked accounts on Scoring rules for that: saving them rescores the whole cycle against the new accounts.</p>
+    </>,
+  },
+  {
+    id: 'raffle',
+    title: 'X raffle checker',
+    body: <>
+      <p>The raffle checker works on anyone on X, not just members, and changes nothing in the bot.</p>
+      <ol>
+        <li><strong>Who entered.</strong> Paste the raffle post and fetch everyone who replied, or paste a list of handles. Fetching reads the post's reply list and also searches the conversation, because X hides low-effort replies such as "done @friend" from the list. Someone who replied twice counts once; the post's author and the accounts they must follow are left out. You can edit the list before checking.</li>
+        <li><strong>What they had to do.</strong> Up to five accounts to follow, starting with the two tracked accounts, and optionally a post to retweet. Likes cannot be checked: X does not show who liked a post.</li>
+        <li><strong>Check.</strong> Every entrant gets a yes or no per account and for the retweet, and a result: passes, missing something, or check by hand.</li>
+      </ol>
+      <p>Each follow is looked up directly, about a tenth of a cent per entrant per account. Retweets come from the post's retweeter list, read once. X does not always return every retweeter; when it returns fewer than the post's retweet count, anyone it left out is marked <strong>Not found</strong> and put under check by hand rather than failed.</p>
     </>,
   },
   {

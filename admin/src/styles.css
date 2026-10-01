@@ -681,3 +681,21 @@ th.score:not(.sortable) { color: var(--muted); text-align: right; }
 .check-row.inline { margin: 0 !important; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 @media (max-width: 900px) { .checker-form { grid-template-columns: 1fr; } }
+
+/* ---- X raffle checker ------------------------------------------------------------------- */
+.raffle-step { margin-bottom: 18px; }
+.raffle-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px 28px; padding: 4px 22px 20px; }
+.raffle-step .checker-run { margin: 0 22px; padding-bottom: 18px; }
+.raffle-post label, .raffle-retweet label, .raffle-list { display: block; font-size: 13px; font-weight: 600; color: #b3bcb7; }
+.inline-field { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.inline-field input { flex: 1; min-width: 0; margin: 0; }
+.checker-accounts .inline-field { margin-top: 0; }
+.raffle-retweet input { width: 100%; margin-top: 8px; }
+.raffle-list textarea { width: 100%; margin-top: 8px; min-height: 200px; font-family: "Cascadia Mono", Consolas, monospace; font-size: 13px; }
+.post-preview { margin-top: 12px; padding: 14px 16px; border: 1px solid var(--line); background: #0f1313; }
+.post-preview .post-text { -webkit-line-clamp: 4; }
+.post-preview .button { margin-top: 10px; }
+.add-account { display: inline-flex; align-items: center; gap: 5px; justify-self: start; font-size: 13px; }
+.reply-cell { max-width: 360px; white-space: normal !important; }
+.reply-cell a { color: var(--text); font-size: 13px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+@media (max-width: 1000px) { .raffle-body { grid-template-columns: 1fr; } }
