@@ -19,6 +19,26 @@ def _normalise(name: str) -> str:
     return re.sub(r"[^0-9a-z]", "", name.lower())
 
 
+_HANDLE = re.compile(r"^[A-Za-z0-9_]{1,15}$")
+
+
+def clean_handles(values: list[str]) -> list[str]:
+    """X handles from pasted text: @ signs and x.com / twitter.com links stripped, invalid
+    entries dropped, duplicates removed regardless of case, order kept."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for raw in values:
+        value = raw.strip()
+        link = re.search(r"(?:x|twitter)\.com/([A-Za-z0-9_]{1,15})", value)
+        if link:
+            value = link.group(1)
+        value = value.removeprefix("@").strip()
+        if _HANDLE.match(value) and value.lower() not in seen:
+            seen.add(value.lower())
+            out.append(value)
+    return out
+
+
 def split_setting(value: str) -> list[str]:
     return [part.strip() for part in (value or "").split(",") if part.strip()]
 

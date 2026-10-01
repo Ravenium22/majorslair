@@ -27,7 +27,7 @@ from .database import (
 )
 from .discord_app import EngagementBot
 from .engagement import EngagementService
-from .roles import match_protected_roles, split_setting
+from .roles import clean_handles, match_protected_roles, split_setting
 from .scoring import DEFAULT_CONFIG, ScoringRules
 from .settings import Settings
 from .twitter_client import TwitterApiClient, TwitterApiError
@@ -142,6 +142,11 @@ class MemberFilters(BaseModel):
     max_score: float | None = None
     threshold: float | None = None
     follows: str = "any"
+
+
+class HandleFollowRequest(BaseModel):
+    handles: list[str] = Field(min_length=1, max_length=200)
+    accounts: list[str] = Field(min_length=1, max_length=3)
 
 
 class RoleBulkRequest(BaseModel):
@@ -861,6 +866,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return await runtime.service.check_follows(
             actor_discord_id=str(admin["discord_user_id"]),
             include_protected=include_protected,
+        )
+
+    @app.post("/api/tools/follow-check")
+    async def follow_check_tool(payload: HandleFollowRequest, admin: MutatingAdmin) -> dict[str, Any]:
+        """Check any list of X handles (raffle winners, say) against up to three accounts."""
+        handles = clean_handles(payload.handles)
+        accounts = clean_handles(payload.accounts)
+        if not handles:
+            raise HTTPException(status_code=422, detail="No valid X handles in the list")
+        if not accounts:
+            raise HTTPException(status_code=422, detail="Name at least one account to check against")
+        return await runtime.service.check_handles_follow(
+            handles=handles, accounts=accounts, actor_discord_id=str(admin["discord_user_id"])
         )
 
     @app.get("/api/users/follow-estimate")

@@ -573,6 +573,18 @@ class TwitterApiClient:
                 handles.add(screen_name.lower())
         return ids, handles, result.complete
 
+    async def is_following(self, source: str, target: str) -> bool:
+        """Whether X account `source` follows `target`. 100 credits per call."""
+        payload = await self._request_json(
+            "/twitter/user/check_follow_relationship",
+            params={
+                "source_user_name": source.removeprefix("@"),
+                "target_user_name": target.removeprefix("@"),
+            },
+        )
+        data = payload.get("data")
+        return bool(data.get("following")) if isinstance(data, dict) else False
+
     async def get_users_by_ids(self, user_ids: list[str]) -> dict[str, dict[str, Any]]:
         """Profiles keyed by stable X user ID, 100 per request.
 

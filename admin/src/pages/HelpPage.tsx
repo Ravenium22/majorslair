@@ -100,6 +100,7 @@ const SECTIONS: { id: string; title: string; body: ReactNode }[] = [
     body: <>
       <p>Check follows, on the Members page, reads the follower list of each tracked account once and matches every linked member against it. That is one pass rather than one lookup per member, and it costs about a cent per thousand followers read. The cost is shown before it runs.</p>
       <p>A member is recorded as not following only when the whole follower list was read. If a list is too long to finish, anyone not found in it stays <strong>not checked</strong>, never marked as not following, so an incomplete read cannot get someone purged.</p>
+      <p><strong>Checking people who are not members</strong>, raffle winners for example: Members, More tools, <strong>Check any X handles</strong>. Paste the handles, name up to three accounts they must follow, and get a yes or no for each. It looks each pair up directly, which costs about a tenth of a cent per check, and it changes nothing in the bot. Do not change the tracked accounts on Scoring rules for this: saving them rescores the whole cycle against the new accounts.</p>
     </>,
   },
   {

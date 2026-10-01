@@ -664,3 +664,20 @@ th.score:not(.sortable) { color: var(--muted); text-align: right; }
 /* A rule group reached from the index flashes its border, so the eye lands on it. */
 .config-group { transition: border-color .6s; }
 .config-group.flash { border-color: var(--teal); }
+
+/* ---- Check any X handles ---------------------------------------------------------------- */
+.checker-form { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 20px 28px; padding: 22px; margin-bottom: 18px; }
+.checker-handles { display: block; font-size: 13px; font-weight: 600; color: #b3bcb7; }
+.checker-handles textarea { width: 100%; margin-top: 8px; min-height: 170px; font-family: "Cascadia Mono", Consolas, monospace; font-size: 13px; }
+.checker-accounts { margin: 0; padding: 0; border: 0; display: grid; gap: 8px; align-content: start; }
+.checker-accounts legend { padding: 0 0 8px; font-size: 13px; font-weight: 600; color: #b3bcb7; }
+.checker-accounts input { width: 100%; }
+.checker-run { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-top: 14px; border-top: 1px solid var(--line-soft); }
+.checker-run p { margin: 0; }
+.checker-table td { white-space: nowrap; }
+.follow-yes, .follow-no { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; }
+.follow-yes { color: var(--green); }
+.follow-no { color: #e0a9a3; }
+.check-row.inline { margin: 0 !important; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+@media (max-width: 900px) { .checker-form { grid-template-columns: 1fr; } }

@@ -45,6 +45,7 @@ const ScansPage = lazyPage(() => import('./pages/ScansPage'))
 const LowActivityPage = lazyPage(() => import('./pages/LowActivityPage'))
 const HelpPage = lazyPage(() => import('./pages/HelpPage'))
 const MemberPage = lazyPage(() => import('./pages/MemberPage'))
+const FollowCheckerPage = lazyPage(() => import('./pages/FollowCheckerPage'))
 
 const routes = [
   { id: 'overview', label: 'Overview', icon: CircleGauge },
@@ -59,7 +60,7 @@ const routes = [
 ] as const
 
 // Pages reached from other pages rather than from the sidebar.
-const hiddenRoutes = ['member'] as const
+const hiddenRoutes = ['member', 'follow-checker'] as const
 type RouteId = (typeof routes)[number]['id'] | (typeof hiddenRoutes)[number]
 
 const fetcher = <T,>(url: string) => api<T>(url)
@@ -122,6 +123,7 @@ function Shell({ session, children }: { session: Session; children: ReactNode })
       case 'low-activity': return <LowActivityPage session={session} />
       case 'help': return <HelpPage />
       case 'member': return <MemberPage session={session} />
+      case 'follow-checker': return <FollowCheckerPage session={session} />
       case 'scoring': return <ScoringPage session={session} />
       case 'audit': return <AuditPage />
       default: return <OverviewPage session={session} />
@@ -149,7 +151,7 @@ function Shell({ session, children }: { session: Session; children: ReactNode })
               <a
                 key={item.id}
                 href={`#${item.id}`}
-                className={route === item.id || (route === 'member' && item.id === 'members') ? 'active' : ''}
+                className={route === item.id || ((route === 'member' || route === 'follow-checker') && item.id === 'members') ? 'active' : ''}
                 onClick={(event) => {
                   // Plain left-click navigates in place; modified clicks and right-click
                   // "open in new tab" keep the browser's default link behaviour.

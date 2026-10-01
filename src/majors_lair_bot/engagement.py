@@ -708,6 +708,53 @@ class EngagementService:
             )
             return summary
 
+    async def check_handles_follow(
+        self, *, handles: list[str], accounts: list[str], actor_discord_id: str
+    ) -> dict[str, Any]:
+        """Check whether arbitrary X handles follow the given accounts, for example raffle
+        winners who may not be in the server at all.
+
+        One lookup per handle and account rather than reading whole follower lists, which is
+        far cheaper for a short list. Reads only: no member, setting or stored follow result
+        changes, so it can be pointed at any accounts without side effects.
+        """
+        semaphore = asyncio.Semaphore(4)
+        self.twitter.reset_usage()
+
+        async def one(handle: str) -> dict[str, Any]:
+            results: dict[str, bool | None] = {}
+            error = ""
+            for account in accounts:
+                try:
+                    async with semaphore:
+                        results[account] = await self.twitter.is_following(handle, account)
+                except TwitterApiError as exc:
+                    results[account] = None
+                    error = str(exc)
+            known = [value for value in results.values() if value is not None]
+            return {
+                "handle": handle,
+                "results": results,
+                "follows_all": bool(known) and len(known) == len(accounts) and all(known),
+                "error": error,
+            }
+
+        rows = await asyncio.gather(*(one(handle) for handle in handles))
+        summary = {
+            "checked": len(rows),
+            "follows_all": sum(1 for row in rows if row["follows_all"]),
+            "errors": sum(1 for row in rows if row["error"]),
+            "accounts": accounts,
+            "calls": self.twitter.request_count,
+            "credits": self.twitter.request_count * 100,
+        }
+        await self.repository.append_audit(
+            event_type="follow_list_checked",
+            actor_discord_id=actor_discord_id,
+            details={**summary, "handles": handles},
+        )
+        return {**summary, "rows": rows}
+
     async def verify_linked_accounts(
         self,
         *,
