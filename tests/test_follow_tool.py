@@ -86,7 +86,7 @@ class RaffleTwitter(FakeTwitter):
         raw["retweetCount"] = self.retweet_count
         return [parse_tweet(raw)]
 
-    async def get_replies(self, tweet_id: str, *, since, until, max_pages: int):
+    async def get_replies(self, tweet_id: str, *, since, until, max_pages: int, empty_pages_allowed: int = 0):
         from majors_lair_bot.models import PageResult
         return PageResult(items=[
             _raw("r1", "ana", "done", tweet_id, 1),
@@ -100,6 +100,12 @@ class RaffleTwitter(FakeTwitter):
         # X hid this reply from the list; only search finds it.
         return PageResult(items=[_raw("r5", "ben", "in @x @y", tweet_id, 5), _raw("r1", "ana", "done", tweet_id, 1)], complete=True, pages=1)
 
+    async def search_replies_to(self, handle: str, *, since, until, max_pages: int, empty_pages_allowed: int = 0):
+        from majors_lair_bot.models import PageResult
+        # The account-wide "to:" search: another hidden entrant, a reply to a different
+        # post (ignored), and ana again (already counted).
+        return PageResult(items=[_raw("r6", "eve", "hidden too", "100", 6), _raw("r7", "zed", "other post", "999", 7), _raw("r1", "ana", "done", "100", 1)], complete=True, pages=1)
+
     async def get_retweeters(self, tweet_id: str, *, max_pages: int):
         from majors_lair_bot.models import PageResult
         return PageResult(items=[{"userName": name} for name in self.retweeters], complete=self.retweeters_complete, pages=1)
@@ -109,9 +115,10 @@ class RaffleTwitter(FakeTwitter):
 async def test_participants_are_direct_replies_once_each_including_hidden_ones(repository: DatabaseRepository) -> None:
     service = EngagementService(repository, RaffleTwitter(retweeters=[], retweet_count=0))
     out = await service.raffle_participants(url="https://x.com/major/status/100", exclude=["proj"])
-    assert [p["handle"] for p in out["participants"]] == ["ana", "ben"]
+    assert [p["handle"] for p in out["participants"]] == ["ana", "ben", "eve"]
     assert out["participants"][0]["reply"] == "done", "the first reply is the one kept"
-    assert out["found_only_by_search"] == 1
+    assert out["found_only_by_search"] == 2
+    assert out["breakdown"] == {"from_list": 1, "only_by_search": 2, "second_replies": 1, "left_out": 1, "nested": 1}
 
 
 @pytest.mark.asyncio
@@ -152,3 +159,34 @@ def test_draw_picks_distinct_winners_fairly() -> None:
         draw_winners(pool, 5)
     with pytest.raises(ValueError):
         draw_winners(pool, 0)
+
+
+
+@pytest.mark.asyncio
+async def test_pager_can_step_over_pages_the_api_filtered_empty() -> None:
+    """twitterapi.io filters each page after X serves it; an empty page is not always the end."""
+    from majors_lair_bot.twitter_client import TwitterApiClient
+
+    pages = [
+        {"replies": [{"id": "1"}], "has_next_page": True, "next_cursor": "a"},
+        {"replies": [], "has_next_page": True, "next_cursor": "b"},
+        {"replies": [{"id": "2"}], "has_next_page": False, "next_cursor": ""},
+    ]
+
+    class Paged(TwitterApiClient):
+        def __init__(self) -> None:
+            self.items_returned = 0
+            self.request_count = 0
+            self.calls = 0
+
+        async def _request_json(self, path, *, params=None):
+            self.calls += 1
+            return pages[self.calls - 1]
+
+    strict = Paged()
+    result = await strict._paginate("/x", params={}, item_key="replies", max_pages=10)
+    assert [i["id"] for i in result.items] == ["1"], "default: an empty page ends the walk"
+
+    tolerant = Paged()
+    result = await tolerant._paginate("/x", params={}, item_key="replies", max_pages=10, empty_pages_allowed=3)
+    assert [i["id"] for i in result.items] == ["1", "2"] and result.complete

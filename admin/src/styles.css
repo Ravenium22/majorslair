@@ -708,3 +708,13 @@ th.score:not(.sortable) { color: var(--muted); text-align: right; }
 .winner-list li::marker { color: var(--amber); font-weight: 650; }
 .winner-list li a { font-weight: 600; }
 .winner-list small { display: block; margin-top: 3px; color: var(--muted); font-size: 12px; }
+
+/* Raffle: pass by hand, fetch report */
+.verdict-cell { white-space: nowrap; }
+.verdict-cell .status { margin-right: 10px; }
+.verdict-cell .link-button { font-size: 12px; }
+.small-button { min-height: 26px; padding: 2px 10px; font-size: 12px; }
+.by-hand-note { margin-left: 10px; color: var(--muted); font-size: 12px; font-weight: 500; }
+.fetch-report { margin-top: 12px; }
+.fetch-report p { margin: 0 0 6px; font-size: 13px; line-height: 1.5; }
+.fetch-report .estimate-warning { margin-top: 8px; }

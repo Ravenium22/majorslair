@@ -42,7 +42,7 @@ function summarise(event: AuditEntry): string {
     case 'admin_member_linked': return d.link_status === 'same'
       ? `Re-linked ${who} to @${event.new_value}, the same handle already on file.`
       : event.old_value ? `Linked ${who} to @${event.new_value}, replacing @${event.old_value}.` : `Linked ${who} to @${event.new_value}.`
-    case 'raffle_drawn': return `Drew ${n(d.count)} raffle winner${n(d.count) === 1 ? '' : 's'} from ${n(d.pool_size)} eligible: ${(d.winners as string[] | undefined ?? []).map((w) => `@${w}`).join(', ')}.`
+    case 'raffle_drawn': return `Drew ${n(d.count)} raffle winner${n(d.count) === 1 ? '' : 's'} from ${n(d.pool_size)} eligible${(d.passed_by_hand as string[] | undefined)?.length ? ` (${(d.passed_by_hand as string[]).length} passed by hand)` : ''}: ${(d.winners as string[] | undefined ?? []).map((w) => `@${w}`).join(', ')}.`
     case 'follow_list_checked': return `Checked ${n(d.checked)} X handle${n(d.checked) === 1 ? '' : 's'} against ${(d.accounts as string[] | undefined ?? []).map((a) => `@${a}`).join(', ')}: ${n(d.passes ?? d.follows_all)} passed.`
     case 'admin_login': return 'Signed in to the dashboard.'
     case 'low_activity_report': return `Opened the low-activity report: ${n(d.items)} members at or below ${d.threshold ?? 'the threshold'}.`

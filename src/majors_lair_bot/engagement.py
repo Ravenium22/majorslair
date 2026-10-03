@@ -743,44 +743,66 @@ class EngagementService:
         post = tweets[0]
         self.twitter.reset_usage()
         since = post.created_at - timedelta(minutes=1)
+        # Raffles close within days; a two-week window keeps the account-wide search bounded.
+        until = min(utc_now(), post.created_at + timedelta(days=14))
         listed = await self.twitter.get_replies(
-            tweet_id, since=since, until=utc_now(), max_pages=max_pages
+            tweet_id, since=since, until=utc_now(), max_pages=max_pages, empty_pages_allowed=3
         )
-        try:
-            searched = await self.twitter.search_conversation(tweet_id, max_pages=max_pages)
-        except TwitterApiError as exc:
-            LOGGER.warning("conversation search failed for %s: %s", tweet_id, exc)
-            searched = None
+        searches: list[tuple[str, Any]] = []
+        for name, fetch in (
+            ("conversation", lambda: self.twitter.search_conversation(tweet_id, max_pages=max_pages)),
+            # The same "to:" search the scans use to find hidden replies, narrowed to this post.
+            ("to_author", lambda: self.twitter.search_replies_to(
+                post.author_handle, since=since, until=until, max_pages=max_pages, empty_pages_allowed=3
+            )),
+        ):
+            try:
+                searches.append((name, await fetch()))
+            except TwitterApiError as exc:
+                LOGGER.warning("raffle %s search failed for %s: %s", name, tweet_id, exc)
         skip = {handle.removeprefix("@").lower() for handle in exclude} | {post.author_handle.lower()}
         people: dict[str, dict[str, Any]] = {}
-        from_search = 0
-        for source, page in (("list", listed), ("search", searched)):
-            if page is None:
-                continue
+        seen_tweets: set[str] = set()
+        counts = {"from_list": 0, "only_by_search": 0, "second_replies": 0, "left_out": 0, "nested": 0}
+        for source, page in [("list", listed), *searches]:
             for item in page.items:
                 try:
                     reply = parse_tweet(item)
                 except (ValueError, TypeError):
                     continue
-                handle = reply.author_handle.lower()
-                if not handle or handle in skip or reply.reply_to_tweet_id != tweet_id:
+                if reply.tweet_id in seen_tweets:
                     continue
-                if handle not in people:
-                    people[handle] = {
-                        "handle": reply.author_handle,
-                        "reply": reply.text,
-                        "replied_at": isoformat(reply.created_at),
-                        "reply_url": reply.url,
-                    }
-                    if source == "search":
-                        from_search += 1
+                seen_tweets.add(reply.tweet_id)
+                handle = reply.author_handle.lower()
+                if not handle:
+                    continue
+                if reply.reply_to_tweet_id != tweet_id:
+                    if source == "list":
+                        counts["nested"] += 1
+                    continue
+                if handle in skip:
+                    counts["left_out"] += 1
+                    continue
+                if handle in people:
+                    counts["second_replies"] += 1
+                    continue
+                people[handle] = {
+                    "handle": reply.author_handle,
+                    "reply": reply.text,
+                    "replied_at": isoformat(reply.created_at),
+                    "reply_url": reply.url,
+                }
+                counts["from_list" if source == "list" else "only_by_search"] += 1
         participants = sorted(people.values(), key=lambda row: row["replied_at"])
         return {
             "tweet_id": tweet_id,
             "author": post.author_handle,
+            "reply_count": post.reply_count,
             "participants": participants,
-            "found_only_by_search": from_search,
-            "complete": bool(listed.complete and (searched is None or searched.complete)),
+            "found_only_by_search": counts["only_by_search"],
+            "breakdown": counts,
+            "searches_run": [name for name, _ in searches],
+            "complete": bool(listed.complete and all(page.complete for _, page in searches)),
             "credits": max(self.twitter.items_returned, self.twitter.request_count) * 15,
         }
 

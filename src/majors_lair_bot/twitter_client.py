@@ -319,11 +319,21 @@ class TwitterApiClient:
         item_key: str | tuple[str, ...],
         max_pages: int,
         stop_when: Callable[[list[dict[str, Any]]], bool] | None = None,
+        empty_pages_allowed: int = 0,
     ) -> PageResult:
+        """Walk pages until the end, the page cap, or `stop_when`.
+
+        `empty_pages_allowed`: twitterapi.io filters each page after X serves it, so a page
+        can come back empty while later pages still hold results. By default an empty page
+        ends the walk (X also sends a documented empty last page); callers that must not
+        stop early can step over that many empty pages in a row, as long as a fresh cursor
+        keeps coming.
+        """
         items: list[dict[str, Any]] = []
         cursor = ""
         complete = False
         pages = 0
+        empty_streak = 0
         for _ in range(max(1, max_pages)):
             query = dict(params)
             if cursor:
@@ -343,10 +353,18 @@ class TwitterApiClient:
             self.items_returned += len(clean_items)
 
             # Official docs note that X can report has_next_page=true and then return
-            # an empty terminal page. Treat that documented case as complete.
+            # an empty terminal page. Treat that documented case as complete, unless the
+            # caller asked to step over filtered-out pages and a new cursor came back.
             if not clean_items:
+                next_cursor = str(self._page_value(payload, "next_cursor", "") or "")
+                has_next = bool(self._page_value(payload, "has_next_page", False))
+                if empty_streak < empty_pages_allowed and has_next and next_cursor and next_cursor != cursor:
+                    empty_streak += 1
+                    cursor = next_cursor
+                    continue
                 complete = True
                 break
+            empty_streak = 0
 
             if stop_when and stop_when(clean_items):
                 complete = True
@@ -435,7 +453,13 @@ class TwitterApiClient:
         return tweets, result.complete
 
     async def get_replies(
-        self, tweet_id: str, *, since: datetime, until: datetime, max_pages: int
+        self,
+        tweet_id: str,
+        *,
+        since: datetime,
+        until: datetime,
+        max_pages: int,
+        empty_pages_allowed: int = 0,
     ) -> PageResult:
         return await self._paginate(
             "/twitter/tweet/replies",
@@ -447,6 +471,7 @@ class TwitterApiClient:
             },
             item_key=("tweets", "replies"),
             max_pages=max_pages,
+            empty_pages_allowed=empty_pages_allowed,
         )
 
     async def get_quotes(self, tweet_id: str, *, since: datetime, max_pages: int) -> PageResult:
@@ -476,7 +501,13 @@ class TwitterApiClient:
         )
 
     async def search_replies_to(
-        self, handle: str, *, since: datetime, until: datetime, max_pages: int
+        self,
+        handle: str,
+        *,
+        since: datetime,
+        until: datetime,
+        max_pages: int,
+        empty_pages_allowed: int = 0,
     ) -> PageResult:
         """Every reply addressed to ``handle`` in the window, via search.
 
@@ -493,6 +524,7 @@ class TwitterApiClient:
             params={"query": query, "queryType": "Latest"},
             item_key="tweets",
             max_pages=max_pages,
+            empty_pages_allowed=empty_pages_allowed,
         )
 
     async def search_conversation(self, tweet_id: str, *, max_pages: int) -> PageResult:
@@ -503,6 +535,7 @@ class TwitterApiClient:
             params={"query": f"conversation_id:{tweet_id}", "queryType": "Latest"},
             item_key="tweets",
             max_pages=max_pages,
+            empty_pages_allowed=3,
         )
 
     async def search_from_user(

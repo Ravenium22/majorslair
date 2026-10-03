@@ -7,8 +7,8 @@ import type { ConfigEntry, Session } from '../types'
 
 type Post = { tweet_id: string; author: string; text: string; created_at: string; reply_count: number; retweet_count: number; url: string }
 type Participant = { handle: string; reply: string; replied_at: string; reply_url: string }
-type Participants = { participants: Participant[]; found_only_by_search: number; complete: boolean; credits: number }
-type Row = { handle: string; results: Record<string, boolean | null>; follows_all: boolean; retweeted: boolean | null; verdict: 'passes' | 'missing' | 'check'; error: string }
+type Participants = { participants: Participant[]; found_only_by_search: number; complete: boolean; credits: number; reply_count?: number; breakdown?: { from_list: number; only_by_search: number; second_replies: number; left_out: number; nested: number } }
+type Row = { handle: string; results: Record<string, boolean | null>; follows_all: boolean; retweeted: boolean | null; verdict: 'passes' | 'missing' | 'check'; error: string; byHand?: boolean }
 type Outcome = { checked: number; passes: number; to_check: number; errors: number; accounts: string[]; retweet: { retweet_count: number; retweeters_found: number; whole_list: boolean } | null; credits: number; rows: Row[] }
 
 const FOLLOW_CHECK_CREDITS = 100
@@ -116,14 +116,19 @@ export default function RafflePage({ session }: { session: Session }) {
     setBusy(true)
     setOutcome(undefined)
     try {
+      setPassedByHand(new Set())
       setOutcome(await mutateApi<Outcome>('/api/tools/follow-check', session.csrf_token, 'POST', { handles, accounts: targets, retweet_url: retweetUrl.trim() }))
       setShow('all')
     } catch (err) { setNotice({ text: err instanceof Error ? err.message : 'The check failed', kind: 'error' }) }
     finally { setBusy(false) }
   }
 
-  const visible = outcome ? outcome.rows.filter((row) => show === 'all' || row.verdict === show) : []
-  const handlesWith = (verdict: Row['verdict']) => (outcome ? outcome.rows.filter((row) => row.verdict === verdict).map((row) => `@${row.handle}`) : [])
+  const [passedByHand, setPassedByHand] = useState<Set<string>>(new Set())
+  const effectiveRows: Row[] = useMemo(() => (outcome ? outcome.rows.map((row) => (passedByHand.has(row.handle) ? { ...row, verdict: 'passes' as const, byHand: true } : row)) : []), [outcome, passedByHand])
+  const count = (verdict: Row['verdict']) => effectiveRows.filter((row) => row.verdict === verdict).length
+  const togglePass = (handle: string) => setPassedByHand((current) => { const next = new Set(current); if (next.has(handle)) next.delete(handle); else next.add(handle); return next })
+  const visible = effectiveRows.filter((row) => show === 'all' || row.verdict === show)
+  const handlesWith = (verdict: Row['verdict']) => effectiveRows.filter((row) => row.verdict === verdict).map((row) => `@${row.handle}`)
   const copy = async (verdict: Row['verdict']) => {
     const list = handlesWith(verdict)
     try { await navigator.clipboard.writeText(list.join('\n')); setNotice({ text: `Copied ${list.length} handle${list.length === 1 ? '' : 's'}.`, kind: 'success' }) }
@@ -133,8 +138,8 @@ export default function RafflePage({ session }: { session: Session }) {
     if (!outcome) return
     const cell = (value: unknown) => { const t = String(value ?? ''); return /[",\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t }
     const yn = (value: boolean | null) => (value === null ? 'unknown' : value ? 'yes' : 'no')
-    const header = ['handle', 'result', ...outcome.accounts.map((a) => `follows_${a}`), ...(outcome.retweet ? ['retweeted'] : []), 'reply', 'error']
-    const lines = outcome.rows.map((row) => [row.handle, VERDICT_LABEL[row.verdict], ...outcome.accounts.map((a) => yn(row.results[a])), ...(outcome.retweet ? [yn(row.retweeted)] : []), replies[row.handle.toLowerCase()]?.reply ?? '', row.error].map(cell).join(','))
+    const header = ['handle', 'result', 'passed_by_hand', ...outcome.accounts.map((a) => `follows_${a}`), ...(outcome.retweet ? ['retweeted'] : []), 'reply', 'error']
+    const lines = effectiveRows.map((row) => [row.handle, VERDICT_LABEL[row.verdict], row.byHand ? 'yes' : 'no', ...outcome.accounts.map((a) => yn(row.results[a])), ...(outcome.retweet ? [yn(row.retweeted)] : []), replies[row.handle.toLowerCase()]?.reply ?? '', row.error].map(cell).join(','))
     const blob = new Blob(['﻿' + [header.join(','), ...lines].join('\r\n')], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
@@ -150,7 +155,7 @@ export default function RafflePage({ session }: { session: Session }) {
   const [howMany, setHowMany] = useState('1')
   const [drawing, setDrawing] = useState(false)
   const [draw, setDraw] = useState<{ winners: string[]; pool_size: number; drawn_at: string }>()
-  const eligible = outcome ? outcome.rows.filter((row) => row.verdict === 'passes').map((row) => row.handle) : []
+  const eligible = effectiveRows.filter((row) => row.verdict === 'passes').map((row) => row.handle)
   const wanted = Number(howMany)
   const wantedValid = Number.isInteger(wanted) && wanted >= 1 && wanted <= eligible.length
   useEscape(pickerOpen && !drawing, () => setPickerOpen(false))
@@ -165,7 +170,7 @@ export default function RafflePage({ session }: { session: Session }) {
     }))) return
     setDrawing(true)
     try {
-      setDraw(await mutateApi<{ winners: string[]; pool_size: number; drawn_at: string }>('/api/tools/raffle/draw', session.csrf_token, 'POST', { pool: eligible, count: wanted, post_url: post?.url ?? '' }))
+      setDraw(await mutateApi<{ winners: string[]; pool_size: number; drawn_at: string }>('/api/tools/raffle/draw', session.csrf_token, 'POST', { pool: eligible, passed_by_hand: [...passedByHand], count: wanted, post_url: post?.url ?? '' }))
     } catch (err) { setNotice({ text: err instanceof Error ? err.message : 'The draw failed', kind: 'error' }) }
     finally { setDrawing(false) }
   }
@@ -192,7 +197,11 @@ export default function RafflePage({ session }: { session: Session }) {
             <p className="muted small">{formatCount(post.reply_count)} replies · {formatCount(post.retweet_count)} retweets</p>
             <button className="button primary" onClick={fetchRepliers} disabled={fetching}><Ticket size={16} /> {fetching ? 'Fetching…' : 'Fetch everyone who replied'}</button>
           </div>}
-          {fetched && <p className="field-hint">{formatCount(fetched.participants.length)} people replied{fetched.found_only_by_search ? `, ${fetched.found_only_by_search} of them only found by search because X hid their reply` : ''}. The author and the accounts below are left out, and someone who replied twice counts once.{fetched.complete ? '' : ' The post has more replies than one fetch reads, so some may be missing.'}</p>}
+          {fetched && <div className="fetch-report">
+            <p><strong>{formatCount(fetched.participants.length)} people</strong> found{fetched.breakdown ? <>: {fetched.breakdown.from_list} from the post's reply list, {fetched.breakdown.only_by_search} more only through search (X hid their reply from the list)</> : null}.</p>
+            {fetched.breakdown && (fetched.breakdown.second_replies + fetched.breakdown.left_out + fetched.breakdown.nested) > 0 && <p className="field-hint">Not counted: {[fetched.breakdown.second_replies ? `${fetched.breakdown.second_replies} second replies by someone already in` : null, fetched.breakdown.left_out ? `${fetched.breakdown.left_out} by the author or the accounts below` : null, fetched.breakdown.nested ? `${fetched.breakdown.nested} replies to other replies` : null].filter(Boolean).join(', ')}.</p>}
+            {fetched.reply_count !== undefined && fetched.reply_count > fetched.participants.length + (fetched.breakdown ? fetched.breakdown.second_replies + fetched.breakdown.left_out + fetched.breakdown.nested : 0) && <p className="estimate-warning">The post shows {formatCount(fetched.reply_count)} replies, so some are still not visible to the bot. Replies X marks as probable spam are hidden from every tool outside X itself. Open "Show probable spam" under the post on X and paste those handles into the list below.</p>}
+          </div>}
         </div>
         <label className="raffle-list">Entrants{handles.length ? ` (${handles.length})` : ''}
           <textarea value={text} onChange={(e) => setText(e.target.value)} rows={9} placeholder={'Filled in from the post, or paste your own.\nOne per line or separated by commas.\n@winner_one\nhttps://x.com/winner_two'} spellCheck={false} disabled={busy} />
@@ -223,11 +232,11 @@ export default function RafflePage({ session }: { session: Session }) {
     </section>
 
     {outcome && <section className="panel">
-      <div className="panel-head"><div><h2>{outcome.passes} of {outcome.checked} pass</h2></div><span>{formatUsd(outcome.credits)} spent</span></div>
+      <div className="panel-head"><div><h2>{count('passes')} of {outcome.checked} pass{passedByHand.size ? <small className="by-hand-note">{passedByHand.size} passed by hand</small> : null}</h2></div><span>{formatUsd(outcome.credits)} spent</span></div>
       <div className="toolbar">
-        <div className="segmented">{(['all', 'passes', 'missing', 'check'] as const).map((key) => <button key={key} className={show === key ? 'active' : ''} aria-pressed={show === key} onClick={() => setShow(key)}>{key === 'all' ? `All ${outcome.checked}` : key === 'passes' ? `Passes ${outcome.passes}` : key === 'missing' ? `Missing something ${handlesWith('missing').length}` : `Check by hand ${outcome.to_check}`}</button>)}</div>
-        <button className="button primary" onClick={openPicker} disabled={!outcome.passes} title={outcome.passes ? undefined : 'Nobody passed, so there is nobody to draw from'}><Dices size={15} /> Pick winners</button>
-        <button className="button" onClick={() => copy('passes')} disabled={!outcome.passes}><Copy size={15} /> Copy who passes</button>
+        <div className="segmented">{(['all', 'passes', 'missing', 'check'] as const).map((key) => <button key={key} className={show === key ? 'active' : ''} aria-pressed={show === key} onClick={() => setShow(key)}>{key === 'all' ? `All ${outcome.checked}` : key === 'passes' ? `Passes ${count('passes')}` : key === 'missing' ? `Missing something ${count('missing')}` : `Check by hand ${count('check')}`}</button>)}</div>
+        <button className="button primary" onClick={openPicker} disabled={!count('passes')} title={count('passes') ? undefined : 'Nobody passed, so there is nobody to draw from'}><Dices size={15} /> Pick winners</button>
+        <button className="button" onClick={() => copy('passes')} disabled={!count('passes')}><Copy size={15} /> Copy who passes</button>
         <button className="button" onClick={download}><Download size={15} /> Download CSV</button>
       </div>
       {outcome.retweet && !outcome.retweet.whole_list && <p className="estimate-warning">X returned {formatCount(outcome.retweet.retweeters_found)} of the post's {formatCount(outcome.retweet.retweet_count)} retweeters, so anyone not among them is marked "Not found" and sorted into Check by hand rather than failed.</p>}
@@ -236,7 +245,11 @@ export default function RafflePage({ session }: { session: Session }) {
           const reply = replies[row.handle.toLowerCase()]
           return <tr key={row.handle}>
             <td><a href={`https://x.com/${row.handle}`} target="_blank" rel="noreferrer">@{row.handle}</a>{row.error && <small className="block muted">{row.error}</small>}</td>
-            <td><span className={`status ${row.verdict === 'passes' ? 'complete' : row.verdict === 'missing' ? 'failed' : ''}`}><i />{VERDICT_LABEL[row.verdict]}</span></td>
+            <td className="verdict-cell"><span className={`status ${row.verdict === 'passes' ? 'complete' : row.verdict === 'missing' ? 'failed' : ''}`}><i />{row.byHand ? 'Passed by hand' : VERDICT_LABEL[row.verdict]}</span>
+              {row.byHand
+                ? <button type="button" className="link-button" onClick={() => togglePass(row.handle)}>Undo</button>
+                : row.verdict !== 'passes' && <button type="button" className="button small-button" onClick={() => togglePass(row.handle)} title="You checked this one on X yourself and they did everything">Pass</button>}
+            </td>
             {outcome.accounts.map((a) => <td key={a}>{mark(row.results[a])}</td>)}
             {outcome.retweet && <td>{mark(row.retweeted)}</td>}
             <td className="reply-cell">{reply ? <a href={reply.reply_url} target="_blank" rel="noreferrer">{reply.reply || 'Open reply'}</a> : <span className="muted">—</span>}</td>
@@ -249,7 +262,7 @@ export default function RafflePage({ session }: { session: Session }) {
       <div className="modal-icon">{draw ? <Trophy /> : <Dices />}</div>
       {!draw ? <>
         <h2>Pick winners</h2>
-        <p>Drawn at random from the <strong>{eligible.length}</strong> entrant{eligible.length === 1 ? '' : 's'} who pass.{outcome.to_check ? <> The {outcome.to_check} marked Check by hand are not in the draw; check them first if they should be.</> : null} Every draw is saved in the Audit trail.</p>
+        <p>Drawn at random from the <strong>{eligible.length}</strong> entrant{eligible.length === 1 ? '' : 's'} who pass.{count('check') ? <> The {count('check')} still marked Check by hand are not in the draw: check them on X and press Pass if they did everything.</> : null}{passedByHand.size ? <> Includes {passedByHand.size} you passed by hand.</> : null} Every draw is saved in the Audit trail.</p>
         <label>How many winners?<input autoFocus type="text" inputMode="numeric" pattern="[0-9]*" value={howMany} onChange={(e) => setHowMany(e.target.value.replace(/[^0-9]/g, '').slice(0, 3))} onKeyDown={(e) => { if (e.key === 'Enter' && wantedValid) void runDraw(false) }} disabled={drawing} /></label>
         {howMany !== '' && !wantedValid && <p className="field-hint error-hint">{wanted < 1 ? 'Pick at least one winner.' : `There are only ${eligible.length} entrant${eligible.length === 1 ? '' : 's'} who pass.`}</p>}
         <div className="modal-actions"><button className="button ghost" onClick={() => setPickerOpen(false)} disabled={drawing}>Cancel</button><button className="button primary" onClick={() => void runDraw(false)} disabled={drawing || !wantedValid}><Dices size={16} /> {drawing ? 'Drawing…' : 'Raffle'}</button></div>

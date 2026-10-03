@@ -155,6 +155,8 @@ class RaffleDrawRequest(BaseModel):
     pool: list[str] = Field(min_length=1, max_length=500)
     count: int = Field(ge=1, le=500)
     post_url: str = Field(default="", max_length=300)
+    # Entrants the admin checked on X themselves and passed; recorded so the draw shows it.
+    passed_by_hand: list[str] = Field(default_factory=list, max_length=500)
 
 
 class RaffleParticipantsRequest(BaseModel):
@@ -918,6 +920,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "count": len(winners),
                 "pool_size": len(pool),
                 "pool": pool,
+                "passed_by_hand": [h for h in clean_handles(payload.passed_by_hand) if h in pool],
                 "post_url": payload.post_url,
                 "drawn_at": drawn_at,
             },
