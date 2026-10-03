@@ -149,6 +149,7 @@ class HandleFollowRequest(BaseModel):
     handles: list[str] = Field(min_length=1, max_length=500)
     accounts: list[str] = Field(min_length=1, max_length=5)
     retweet_url: str = ""
+    retweet_urls: list[str] = Field(default_factory=list, max_length=3)
 
 
 class RaffleDrawRequest(BaseModel):
@@ -898,6 +899,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 accounts=accounts,
                 actor_discord_id=str(admin["discord_user_id"]),
                 retweet_url=payload.retweet_url.strip(),
+                retweet_urls=[url.strip() for url in payload.retweet_urls if url.strip()],
             )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc

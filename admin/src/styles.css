@@ -718,3 +718,13 @@ th.score:not(.sortable) { color: var(--muted); text-align: right; }
 .fetch-report { margin-top: 12px; }
 .fetch-report p { margin: 0 0 6px; font-size: 13px; line-height: 1.5; }
 .fetch-report .estimate-warning { margin-top: 8px; }
+
+/* Raffle: several posts to retweet, source report */
+.retweet-actions { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; }
+.retweet-actions .link-button { font-size: 13px; }
+.source-report { margin: 4px 0 6px; font-size: 12px; color: var(--muted); }
+.source-report summary { cursor: pointer; width: fit-content; }
+.source-report ul { margin: 6px 0 0; padding: 0; list-style: none; display: grid; gap: 3px; }
+.source-report li { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.source-report li span:first-child { min-width: 150px; color: #b3bcb7; }
+.failed-text { color: #e0a9a3; }

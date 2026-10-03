@@ -731,10 +731,11 @@ class EngagementService:
     ) -> dict[str, Any]:
         """Everyone who replied to a post, one row per person with their first reply.
 
-        Reads the post's reply list and also searches the conversation, because X hides
-        low-effort replies from the list and raffle entries often look exactly like that.
-        Only direct replies to the post count; the post's author and the accounts being
-        checked against are left out.
+        Reads the thread the way X shows it (newest first and X's own order), the older
+        reply list, and two searches, because each misses replies the others return. Only
+        direct replies to the post count; the post's author and the accounts being checked
+        against are left out. What each source returned is reported, so a short result can
+        be traced to the source that fell short.
         """
         tweet_id = parse_status_url(url)
         tweets = await self.twitter.get_tweets([tweet_id])
@@ -745,26 +746,35 @@ class EngagementService:
         since = post.created_at - timedelta(minutes=1)
         # Raffles close within days; a two-week window keeps the account-wide search bounded.
         until = min(utc_now(), post.created_at + timedelta(days=14))
-        listed = await self.twitter.get_replies(
-            tweet_id, since=since, until=utc_now(), max_pages=max_pages, empty_pages_allowed=3
-        )
-        searches: list[tuple[str, Any]] = []
-        for name, fetch in (
+        list_sources = {"thread_latest", "thread_top", "reply_list"}
+        fetches = (
+            ("thread_latest", lambda: self.twitter.get_replies_v2(tweet_id, query_type="Latest", max_pages=max_pages)),
+            ("thread_top", lambda: self.twitter.get_replies_v2(tweet_id, query_type="Relevance", max_pages=max_pages)),
+            ("reply_list", lambda: self.twitter.get_replies(
+                tweet_id, since=since, until=utc_now(), max_pages=max_pages, empty_pages_allowed=3
+            )),
             ("conversation", lambda: self.twitter.search_conversation(tweet_id, max_pages=max_pages)),
             # The same "to:" search the scans use to find hidden replies, narrowed to this post.
             ("to_author", lambda: self.twitter.search_replies_to(
                 post.author_handle, since=since, until=until, max_pages=max_pages, empty_pages_allowed=3
             )),
-        ):
+        )
+        searches: list[tuple[str, Any]] = []
+        source_report: list[dict[str, Any]] = []
+        for name, fetch in fetches:
             try:
                 searches.append((name, await fetch()))
             except TwitterApiError as exc:
-                LOGGER.warning("raffle %s search failed for %s: %s", name, tweet_id, exc)
+                LOGGER.warning("raffle source %s failed for %s: %s", name, tweet_id, exc)
+                source_report.append({"source": name, "items": 0, "new": 0, "pages": 0, "complete": False, "error": str(exc)[:200]})
+        if not searches:
+            raise ValueError("X did not return the replies. Try again in a minute.")
         skip = {handle.removeprefix("@").lower() for handle in exclude} | {post.author_handle.lower()}
         people: dict[str, dict[str, Any]] = {}
         seen_tweets: set[str] = set()
         counts = {"from_list": 0, "only_by_search": 0, "second_replies": 0, "left_out": 0, "nested": 0}
-        for source, page in [("list", listed), *searches]:
+        for source, page in searches:
+            found_before = len(people)
             for item in page.items:
                 try:
                     reply = parse_tweet(item)
@@ -777,7 +787,7 @@ class EngagementService:
                 if not handle:
                     continue
                 if reply.reply_to_tweet_id != tweet_id:
-                    if source == "list":
+                    if source in list_sources:
                         counts["nested"] += 1
                     continue
                 if handle in skip:
@@ -792,7 +802,10 @@ class EngagementService:
                     "replied_at": isoformat(reply.created_at),
                     "reply_url": reply.url,
                 }
-                counts["from_list" if source == "list" else "only_by_search"] += 1
+                counts["from_list" if source in list_sources else "only_by_search"] += 1
+            source_report.append({"source": source, "items": len(page.items), "new": len(people) - found_before, "pages": page.pages, "complete": page.complete, "error": ""})
+        order = [name for name, _ in fetches]
+        source_report.sort(key=lambda row: order.index(row["source"]))
         participants = sorted(people.values(), key=lambda row: row["replied_at"])
         return {
             "tweet_id": tweet_id,
@@ -802,7 +815,8 @@ class EngagementService:
             "found_only_by_search": counts["only_by_search"],
             "breakdown": counts,
             "searches_run": [name for name, _ in searches],
-            "complete": bool(listed.complete and all(page.complete for _, page in searches)),
+            "sources": source_report,
+            "complete": all(page.complete for _, page in searches),
             "credits": max(self.twitter.items_returned, self.twitter.request_count) * 15,
         }
 
@@ -813,6 +827,7 @@ class EngagementService:
         accounts: list[str],
         actor_discord_id: str,
         retweet_url: str = "",
+        retweet_urls: list[str] | None = None,
     ) -> dict[str, Any]:
         """Check whether arbitrary X handles follow the given accounts, for example raffle
         winners who may not be in the server at all.
@@ -827,22 +842,29 @@ class EngagementService:
         # A required retweet is checked against the post's retweeter list, read once. X does
         # not always return every retweeter, so someone missing from a list that came back
         # short of the retweet count is "not found" (check by hand), never a plain "no".
-        retweeters: set[str] | None = None
-        retweet_list_whole = False
-        retweet_post: dict[str, Any] | None = None
-        if retweet_url:
-            retweet_id = parse_status_url(retweet_url)
+        # Some raffles ask for more than one post to be retweeted; each is checked the same way.
+        retweet_ids: list[str] = []
+        for url in [retweet_url, *(retweet_urls or [])]:
+            if url and url.strip():
+                post_id = parse_status_url(url.strip())
+                if post_id not in retweet_ids:
+                    retweet_ids.append(post_id)
+        retweet_posts: list[dict[str, Any]] = []
+        retweeter_sets: dict[str, tuple[set[str], bool]] = {}
+        for number, retweet_id in enumerate(retweet_ids, start=1):
             posts = await self.twitter.get_tweets([retweet_id])
             if not posts:
-                raise ValueError("The post to retweet was not found, or it is not public")
+                label = "The post to retweet" if len(retweet_ids) == 1 else f"Post to retweet {number}"
+                raise ValueError(f"{label} was not found, or it is not public")
             page = await self.twitter.get_retweeters(retweet_id, max_pages=50)
-            retweeters = set()
+            names: set[str] = set()
             for item in page.items:
                 name = deep_get(item, (("userName",), ("screen_name",), ("username",)), default="")
                 if name:
-                    retweeters.add(str(name).lower())
-            retweet_list_whole = page.complete and len(retweeters) >= posts[0].retweet_count
-            retweet_post = {"tweet_id": retweet_id, "retweet_count": posts[0].retweet_count, "retweeters_found": len(retweeters), "whole_list": retweet_list_whole}
+                    names.add(str(name).lower())
+            whole = page.complete and len(names) >= posts[0].retweet_count
+            retweeter_sets[retweet_id] = (names, whole)
+            retweet_posts.append({"tweet_id": retweet_id, "url": posts[0].url, "author": posts[0].author_handle, "retweet_count": posts[0].retweet_count, "retweeters_found": len(names), "whole_list": whole})
 
         async def one(handle: str) -> dict[str, Any]:
             results: dict[str, bool | None] = {}
@@ -856,10 +878,15 @@ class EngagementService:
                     error = str(exc)
             known = [value for value in results.values() if value is not None]
             follows_all = bool(known) and len(known) == len(accounts) and all(known)
+            retweets: dict[str, bool | None] = {}
+            for post_id, (names, whole) in retweeter_sets.items():
+                retweets[post_id] = True if handle.lower() in names else (False if whole else None)
+            # All posts retweeted: yes. Any proven missing: no. Otherwise not known.
             retweeted: bool | None = None
-            if retweeters is not None:
-                retweeted = True if handle.lower() in retweeters else (False if retweet_list_whole else None)
-            if error or (retweeters is not None and retweeted is None and follows_all):
+            if retweets:
+                values = list(retweets.values())
+                retweeted = False if False in values else (None if None in values else True)
+            if error or (retweets and retweeted is None and follows_all):
                 verdict = "check"
             elif follows_all and retweeted is not False:
                 verdict = "passes"
@@ -870,6 +897,7 @@ class EngagementService:
                 "results": results,
                 "follows_all": follows_all,
                 "retweeted": retweeted,
+                "retweets": retweets,
                 "verdict": verdict,
                 "error": error,
             }
@@ -882,7 +910,8 @@ class EngagementService:
             "to_check": sum(1 for row in rows if row["verdict"] == "check"),
             "errors": sum(1 for row in rows if row["error"]),
             "accounts": accounts,
-            "retweet": retweet_post,
+            "retweet": retweet_posts[0] if retweet_posts else None,
+            "retweet_posts": retweet_posts,
             "calls": self.twitter.request_count,
             # Follow lookups are 100 credits each; tweet and retweeter reads 15 per item.
             "credits": sum(1 for row in rows for _ in accounts) * 100 + self.twitter.items_returned * 15,

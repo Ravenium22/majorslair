@@ -7,14 +7,18 @@ import type { ConfigEntry, Session } from '../types'
 
 type Post = { tweet_id: string; author: string; text: string; created_at: string; reply_count: number; retweet_count: number; url: string }
 type Participant = { handle: string; reply: string; replied_at: string; reply_url: string }
-type Participants = { participants: Participant[]; found_only_by_search: number; complete: boolean; credits: number; reply_count?: number; breakdown?: { from_list: number; only_by_search: number; second_replies: number; left_out: number; nested: number } }
-type Row = { handle: string; results: Record<string, boolean | null>; follows_all: boolean; retweeted: boolean | null; verdict: 'passes' | 'missing' | 'check'; error: string; byHand?: boolean }
-type Outcome = { checked: number; passes: number; to_check: number; errors: number; accounts: string[]; retweet: { retweet_count: number; retweeters_found: number; whole_list: boolean } | null; credits: number; rows: Row[] }
+type Participants = { participants: Participant[]; found_only_by_search: number; complete: boolean; credits: number; reply_count?: number; breakdown?: { from_list: number; only_by_search: number; second_replies: number; left_out: number; nested: number }; sources?: SourceRow[] }
+type SourceRow = { source: string; items: number; new: number; pages: number; complete: boolean; error: string }
+type RetweetPost = { tweet_id: string; url: string; author: string; retweet_count: number; retweeters_found: number; whole_list: boolean }
+type Row = { handle: string; results: Record<string, boolean | null>; follows_all: boolean; retweeted: boolean | null; retweets?: Record<string, boolean | null>; verdict: 'passes' | 'missing' | 'check'; error: string; byHand?: boolean }
+type Outcome = { checked: number; passes: number; to_check: number; errors: number; accounts: string[]; retweet: RetweetPost | null; retweet_posts?: RetweetPost[]; credits: number; rows: Row[] }
 
 const FOLLOW_CHECK_CREDITS = 100
 const ITEM_CREDITS = 15
 const HANDLE = /^[A-Za-z0-9_]{1,15}$/
 const MAX_ACCOUNTS = 5
+const MAX_RETWEETS = 3
+const SOURCE_LABEL: Record<string, string> = { thread_latest: 'Thread, newest first', thread_top: "Thread, X's order", reply_list: 'Reply list', conversation: 'Conversation search', to_author: 'Replies-to search' }
 
 /** Handles from pasted text: @ and x.com links stripped, duplicates and junk dropped. */
 function parse(text: string): { handles: string[]; invalid: string[] } {
@@ -63,12 +67,12 @@ export default function RafflePage({ session }: { session: Session }) {
 
   const fetchRepliers = async () => {
     if (!post) return
-    // Replies are read twice (the post's list, and a search for the ones X hides), so the
-    // estimate allows for both.
-    const estimate = Math.max(1, post.reply_count) * ITEM_CREDITS * 2
+    // Replies are read from five sources (two thread views, the reply list, two searches),
+    // each returning many of the same replies, so the estimate allows for all of them.
+    const estimate = Math.max(1, post.reply_count) * ITEM_CREDITS * 5
     if (!(await confirm({
       title: `Fetch everyone who replied to @${post.author}?`,
-      body: <>The post shows {formatCount(post.reply_count)} repl{post.reply_count === 1 ? 'y' : 'ies'}. The bot reads the reply list and also searches the conversation, because X hides low-effort replies such as "done @friend" from the list. About {formatUsd(estimate)}. {handles.length ? 'This replaces the handles already in the list.' : ''}</>,
+      body: <>The post shows {formatCount(post.reply_count)} repl{post.reply_count === 1 ? 'y' : 'ies'}. The bot reads the thread two ways, the reply list, and two searches, because each misses replies the others return. About {formatUsd(estimate)}. {handles.length ? 'This replaces the handles already in the list.' : ''}</>,
       confirmLabel: 'Fetch repliers',
       tone: 'cost',
     }))) return
@@ -79,7 +83,7 @@ export default function RafflePage({ session }: { session: Session }) {
       setReplies(Object.fromEntries(result.participants.map((p) => [p.handle.toLowerCase(), p])))
       setText(result.participants.map((p) => `@${p.handle}`).join('\n'))
       setOutcome(undefined)
-      if (!retweetUrl) setRetweetUrl(post.url)
+      if (!retweetUrls.some((url) => url.trim())) setRetweetUrls([post.url])
     } catch (err) { setNotice({ text: err instanceof Error ? err.message : 'Could not fetch the replies', kind: 'error' }) }
     finally { setFetching(false) }
   }
@@ -87,7 +91,8 @@ export default function RafflePage({ session }: { session: Session }) {
   // ---- 2. What they had to do ---------------------------------------------------------------
   const [accounts, setAccounts] = useState<string[]>(['', ''])
   const [prefilled, setPrefilled] = useState(false)
-  const [retweetUrl, setRetweetUrl] = useState('')
+  const [retweetUrls, setRetweetUrls] = useState<string[]>([''])
+  const retweetList = retweetUrls.map((url) => url.trim()).filter(Boolean)
   useEffect(() => {
     if (prefilled || !config) return
     const value = (key: string) => config.find((entry) => entry.key === key)?.value ?? ''
@@ -101,7 +106,8 @@ export default function RafflePage({ session }: { session: Session }) {
   const [outcome, setOutcome] = useState<Outcome>()
   const [show, setShow] = useState<'all' | 'passes' | 'missing' | 'check'>('all')
   const lookups = handles.length * targets.length
-  const estimate = lookups * FOLLOW_CHECK_CREDITS + (retweetUrl.trim() ? Math.max(100, post?.retweet_count ?? 100) * ITEM_CREDITS : 0)
+  const estimate = lookups * FOLLOW_CHECK_CREDITS + retweetList.length * Math.max(100, post?.retweet_count ?? 100) * ITEM_CREDITS
+  const retweetWords = retweetList.length === 1 ? 'the post' : `all ${retweetList.length} posts`
   const tooMany = handles.length > 500
   const ready = handles.length > 0 && targets.length > 0 && !tooMany
 
@@ -109,7 +115,7 @@ export default function RafflePage({ session }: { session: Session }) {
     if (!ready) return
     if (!(await confirm({
       title: `Check ${handles.length} entr${handles.length === 1 ? 'y' : 'ies'}?`,
-      body: <>Each entry is checked for following {targets.map((t) => `@${t}`).join(', ')}{retweetUrl.trim() ? ' and for retweeting the post' : ''}: {formatCount(lookups)} follow lookup{lookups === 1 ? '' : 's'}{retweetUrl.trim() ? ' plus one read of the retweeter list' : ''}, about {formatUsd(estimate)}. It only reads; nothing in the bot changes.</>,
+      body: <>Each entry is checked for following {targets.map((t) => `@${t}`).join(', ')}{retweetList.length ? ` and for retweeting ${retweetWords}` : ''}: {formatCount(lookups)} follow lookup{lookups === 1 ? '' : 's'}{retweetList.length ? ` plus ${retweetList.length === 1 ? 'one read of the retweeter list' : `a read of each post's retweeter list`}` : ''}, about {formatUsd(estimate)}. It only reads; nothing in the bot changes.</>,
       confirmLabel: 'Run the check',
       tone: 'cost',
     }))) return
@@ -117,7 +123,7 @@ export default function RafflePage({ session }: { session: Session }) {
     setOutcome(undefined)
     try {
       setPassedByHand(new Set())
-      setOutcome(await mutateApi<Outcome>('/api/tools/follow-check', session.csrf_token, 'POST', { handles, accounts: targets, retweet_url: retweetUrl.trim() }))
+      setOutcome(await mutateApi<Outcome>('/api/tools/follow-check', session.csrf_token, 'POST', { handles, accounts: targets, retweet_urls: retweetList }))
       setShow('all')
     } catch (err) { setNotice({ text: err instanceof Error ? err.message : 'The check failed', kind: 'error' }) }
     finally { setBusy(false) }
@@ -126,6 +132,8 @@ export default function RafflePage({ session }: { session: Session }) {
   const [passedByHand, setPassedByHand] = useState<Set<string>>(new Set())
   const effectiveRows: Row[] = useMemo(() => (outcome ? outcome.rows.map((row) => (passedByHand.has(row.handle) ? { ...row, verdict: 'passes' as const, byHand: true } : row)) : []), [outcome, passedByHand])
   const count = (verdict: Row['verdict']) => effectiveRows.filter((row) => row.verdict === verdict).length
+  const rtPosts: RetweetPost[] = outcome ? (outcome.retweet_posts ?? (outcome.retweet ? [outcome.retweet] : [])) : []
+  const rtLabel = (p: RetweetPost) => `post ${rtPosts.indexOf(p) + 1}${p.author ? ` (@${p.author})` : ''}`
   const togglePass = (handle: string) => setPassedByHand((current) => { const next = new Set(current); if (next.has(handle)) next.delete(handle); else next.add(handle); return next })
   const visible = effectiveRows.filter((row) => show === 'all' || row.verdict === show)
   const handlesWith = (verdict: Row['verdict']) => effectiveRows.filter((row) => row.verdict === verdict).map((row) => `@${row.handle}`)
@@ -138,8 +146,8 @@ export default function RafflePage({ session }: { session: Session }) {
     if (!outcome) return
     const cell = (value: unknown) => { const t = String(value ?? ''); return /[",\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t }
     const yn = (value: boolean | null) => (value === null ? 'unknown' : value ? 'yes' : 'no')
-    const header = ['handle', 'result', 'passed_by_hand', ...outcome.accounts.map((a) => `follows_${a}`), ...(outcome.retweet ? ['retweeted'] : []), 'reply', 'error']
-    const lines = effectiveRows.map((row) => [row.handle, VERDICT_LABEL[row.verdict], row.byHand ? 'yes' : 'no', ...outcome.accounts.map((a) => yn(row.results[a])), ...(outcome.retweet ? [yn(row.retweeted)] : []), replies[row.handle.toLowerCase()]?.reply ?? '', row.error].map(cell).join(','))
+    const header = ['handle', 'result', 'passed_by_hand', ...outcome.accounts.map((a) => `follows_${a}`), ...rtPosts.map((p, i) => (rtPosts.length === 1 ? 'retweeted' : `retweeted_post_${i + 1}`)), 'reply', 'error']
+    const lines = effectiveRows.map((row) => [row.handle, VERDICT_LABEL[row.verdict], row.byHand ? 'yes' : 'no', ...outcome.accounts.map((a) => yn(row.results[a])), ...rtPosts.map((p) => yn(row.retweets ? row.retweets[p.tweet_id] ?? null : row.retweeted)), replies[row.handle.toLowerCase()]?.reply ?? '', row.error].map(cell).join(','))
     const blob = new Blob(['﻿' + [header.join(','), ...lines].join('\r\n')], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
@@ -200,7 +208,8 @@ export default function RafflePage({ session }: { session: Session }) {
           {fetched && <div className="fetch-report">
             <p><strong>{formatCount(fetched.participants.length)} people</strong> found{fetched.breakdown ? <>: {fetched.breakdown.from_list} from the post's reply list, {fetched.breakdown.only_by_search} more only through search (X hid their reply from the list)</> : null}.</p>
             {fetched.breakdown && (fetched.breakdown.second_replies + fetched.breakdown.left_out + fetched.breakdown.nested) > 0 && <p className="field-hint">Not counted: {[fetched.breakdown.second_replies ? `${fetched.breakdown.second_replies} second replies by someone already in` : null, fetched.breakdown.left_out ? `${fetched.breakdown.left_out} by the author or the accounts below` : null, fetched.breakdown.nested ? `${fetched.breakdown.nested} replies to other replies` : null].filter(Boolean).join(', ')}.</p>}
-            {fetched.reply_count !== undefined && fetched.reply_count > fetched.participants.length + (fetched.breakdown ? fetched.breakdown.second_replies + fetched.breakdown.left_out + fetched.breakdown.nested : 0) && <p className="estimate-warning">The post shows {formatCount(fetched.reply_count)} replies, so some are still not visible to the bot. Replies X marks as probable spam are hidden from every tool outside X itself. Open "Show probable spam" under the post on X and paste those handles into the list below.</p>}
+            {fetched.sources && <details className="source-report"><summary>Where they came from</summary><ul>{fetched.sources.map((s) => <li key={s.source}><span>{SOURCE_LABEL[s.source] ?? s.source}</span>{s.error ? <span className="failed-text">failed: {s.error}</span> : <span>{formatCount(s.items)} replies read, {formatCount(s.new)} new{s.complete ? '' : ', stopped early'}</span>}</li>)}</ul></details>}
+            {fetched.reply_count !== undefined && fetched.reply_count > fetched.participants.length + (fetched.breakdown ? fetched.breakdown.second_replies + fetched.breakdown.left_out + fetched.breakdown.nested : 0) && <p className="estimate-warning">The post shows {formatCount(fetched.reply_count)} replies, so some are still not visible to the bot. Replies X marks as probable spam are not available to any outside tool. Open "Show probable spam" under the post on X and paste those handles into the list.</p>}
           </div>}
         </div>
         <label className="raffle-list">Entrants{handles.length ? ` (${handles.length})` : ''}
@@ -219,14 +228,18 @@ export default function RafflePage({ session }: { session: Session }) {
           {accounts.length < MAX_ACCOUNTS && <button type="button" className="link-button add-account" onClick={() => setAccounts([...accounts, ''])}><Plus size={14} /> Add an account</button>}
           <small className="field-hint">Starts with the two tracked accounts; change them freely, it only affects this check.</small>
         </fieldset>
-        <div className="raffle-retweet">
-          <label>Retweet this post<input value={retweetUrl} onChange={(e) => setRetweetUrl(e.target.value)} placeholder="Optional. e.g. https://x.com/m_m3l/status/…" spellCheck={false} disabled={busy} /></label>
-          {post && retweetUrl !== post.url && <button type="button" className="link-button" onClick={() => setRetweetUrl(post.url)}>Use the raffle post</button>}
-          <p className="field-hint">Likes cannot be checked: X does not show who liked a post. If X returns fewer retweeters than the post has, anyone it did not return is marked "Not found" for you to check, never "No".</p>
-        </div>
+        <fieldset className="checker-accounts raffle-retweet" disabled={busy}>
+          <legend>Retweet</legend>
+          {retweetUrls.map((value, index) => <span className="inline-field" key={index}><input value={value} onChange={(e) => setRetweetUrls(retweetUrls.map((u, i) => (i === index ? e.target.value : u)))} placeholder={index === 0 ? 'Optional. e.g. https://x.com/m_m3l/status/…' : 'Another post they had to retweet'} spellCheck={false} aria-label={`Post to retweet ${index + 1}`} />{retweetUrls.length > 1 && <button type="button" className="icon-button" onClick={() => setRetweetUrls(retweetUrls.filter((_, i) => i !== index))} aria-label={`Remove post ${index + 1}`}><X size={15} /></button>}</span>)}
+          <span className="retweet-actions">
+            {retweetUrls.length < MAX_RETWEETS && <button type="button" className="link-button add-account" onClick={() => setRetweetUrls([...retweetUrls, ''])}><Plus size={14} /> Add another post</button>}
+            {post && !retweetUrls.some((url) => url.trim() === post.url) && <button type="button" className="link-button" onClick={() => setRetweetUrls(retweetUrls.some((url) => url.trim()) ? [...retweetUrls.filter((url) => url.trim()), post.url].slice(0, MAX_RETWEETS) : [post.url])}>Use the raffle post</button>}
+          </span>
+          <small className="field-hint">Everyone has to have retweeted every post listed. Likes cannot be checked: X does not show who liked a post. If X returns fewer retweeters than a post has, anyone it did not return is marked "Not found" for you to check, never "No".</small>
+        </fieldset>
       </div>
       <div className="checker-run">
-        <p className="muted">{ready ? <>{formatCount(handles.length)} entr{handles.length === 1 ? 'y' : 'ies'} · {formatCount(lookups)} follow lookups{retweetUrl.trim() ? ' + retweeters' : ''} · about <strong>{formatUsd(estimate)}</strong></> : 'Add entrants and at least one account.'}</p>
+        <p className="muted">{ready ? <>{formatCount(handles.length)} entr{handles.length === 1 ? 'y' : 'ies'} · {formatCount(lookups)} follow lookups{retweetList.length ? ` + retweeters of ${retweetList.length} post${retweetList.length === 1 ? '' : 's'}` : ''} · about <strong>{formatUsd(estimate)}</strong></> : 'Add entrants and at least one account.'}</p>
         <button className="button primary" onClick={run} disabled={busy || !ready}><Ticket size={16} /> {busy ? 'Checking…' : '3. Check who did it'}</button>
       </div>
     </section>
@@ -239,8 +252,8 @@ export default function RafflePage({ session }: { session: Session }) {
         <button className="button" onClick={() => copy('passes')} disabled={!count('passes')}><Copy size={15} /> Copy who passes</button>
         <button className="button" onClick={download}><Download size={15} /> Download CSV</button>
       </div>
-      {outcome.retweet && !outcome.retweet.whole_list && <p className="estimate-warning">X returned {formatCount(outcome.retweet.retweeters_found)} of the post's {formatCount(outcome.retweet.retweet_count)} retweeters, so anyone not among them is marked "Not found" and sorted into Check by hand rather than failed.</p>}
-      {visible.length ? <div className="table-wrap"><table className="checker-table"><thead><tr><th>Entrant</th><th>Result</th>{outcome.accounts.map((a) => <th key={a}>Follows @{a}</th>)}{outcome.retweet && <th>Retweeted</th>}<th>Their reply</th></tr></thead><tbody>
+      {rtPosts.filter((p) => !p.whole_list).map((p) => <p key={p.tweet_id} className="estimate-warning">X returned {formatCount(p.retweeters_found)} of {rtLabel(p)}'s {formatCount(p.retweet_count)} retweeters, so anyone not among them is marked "Not found" and sorted into Check by hand rather than failed.</p>)}
+      {visible.length ? <div className="table-wrap"><table className="checker-table"><thead><tr><th>Entrant</th><th>Result</th>{outcome.accounts.map((a) => <th key={a}>Follows @{a}</th>)}{rtPosts.map((p) => <th key={p.tweet_id}><a href={p.url} target="_blank" rel="noreferrer">{rtPosts.length === 1 ? 'Retweeted' : `Retweeted ${rtLabel(p)}`}</a></th>)}<th>Their reply</th></tr></thead><tbody>
         {visible.map((row) => {
           const reply = replies[row.handle.toLowerCase()]
           return <tr key={row.handle}>
@@ -251,7 +264,7 @@ export default function RafflePage({ session }: { session: Session }) {
                 : row.verdict !== 'passes' && <button type="button" className="button small-button" onClick={() => togglePass(row.handle)} title="You checked this one on X yourself and they did everything">Pass</button>}
             </td>
             {outcome.accounts.map((a) => <td key={a}>{mark(row.results[a])}</td>)}
-            {outcome.retweet && <td>{mark(row.retweeted)}</td>}
+            {rtPosts.map((p) => <td key={p.tweet_id}>{mark(row.retweets ? row.retweets[p.tweet_id] ?? null : row.retweeted)}</td>)}
             <td className="reply-cell">{reply ? <a href={reply.reply_url} target="_blank" rel="noreferrer">{reply.reply || 'Open reply'}</a> : <span className="muted">—</span>}</td>
           </tr>
         })}

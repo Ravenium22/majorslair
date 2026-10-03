@@ -474,6 +474,23 @@ class TwitterApiClient:
             empty_pages_allowed=empty_pages_allowed,
         )
 
+    async def get_replies_v2(
+        self, tweet_id: str, *, query_type: str = "Latest", max_pages: int
+    ) -> PageResult:
+        """A post's replies as X's own conversation view lists them (`/tweet/replies/v2`).
+
+        The v1 endpoint takes a time window and behaves like search, so it misses the same
+        replies search does; this one reads the thread itself, sorted by `query_type`
+        (Relevance, Latest or Likes).
+        """
+        return await self._paginate(
+            "/twitter/tweet/replies/v2",
+            params={"tweetId": tweet_id, "queryType": query_type},
+            item_key=("tweets", "replies"),
+            max_pages=max_pages,
+            empty_pages_allowed=3,
+        )
+
     async def get_quotes(self, tweet_id: str, *, since: datetime, max_pages: int) -> PageResult:
         def reached_cutoff(page_items: list[dict[str, Any]]) -> bool:
             dates = []

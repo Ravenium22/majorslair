@@ -74,9 +74,11 @@ def _raw(tweet_id: str, author: str, text: str, reply_to: str = "", minutes: int
 
 
 class RaffleTwitter(FakeTwitter):
-    def __init__(self, *, retweeters: list[str], retweet_count: int, retweeters_complete: bool = True) -> None:
+    def __init__(self, *, retweeters: list[str], retweet_count: int, retweeters_complete: bool = True, by_post: dict[str, list[str]] | None = None, thread_fails: bool = False) -> None:
         super().__init__(follows={("ana", "major"), ("ana", "proj"), ("ben", "major"), ("ben", "proj"), ("cy", "major")}, missing=set())
         self.retweeters = retweeters
+        self.by_post = by_post or {}
+        self.thread_fails = thread_fails
         self.retweet_count = retweet_count
         self.retweeters_complete = retweeters_complete
 
@@ -85,6 +87,13 @@ class RaffleTwitter(FakeTwitter):
         raw = _raw(ids[0], "major", "Raffle! Reply, follow, RT")
         raw["retweetCount"] = self.retweet_count
         return [parse_tweet(raw)]
+
+    async def get_replies_v2(self, tweet_id: str, *, query_type: str = "Latest", max_pages: int):
+        from majors_lair_bot.models import PageResult
+        if self.thread_fails:
+            raise TwitterApiError("Bad gateway", status=502, path="/twitter/tweet/replies/v2")
+        # The thread view returns fay, whom the time-window list and both searches miss.
+        return PageResult(items=[_raw("r8", "fay", "in", tweet_id, 8), _raw("r1", "ana", "done", tweet_id, 1)], complete=True, pages=1)
 
     async def get_replies(self, tweet_id: str, *, since, until, max_pages: int, empty_pages_allowed: int = 0):
         from majors_lair_bot.models import PageResult
@@ -108,17 +117,47 @@ class RaffleTwitter(FakeTwitter):
 
     async def get_retweeters(self, tweet_id: str, *, max_pages: int):
         from majors_lair_bot.models import PageResult
-        return PageResult(items=[{"userName": name} for name in self.retweeters], complete=self.retweeters_complete, pages=1)
+        names = self.by_post.get(tweet_id, self.retweeters)
+        return PageResult(items=[{"userName": name} for name in names], complete=self.retweeters_complete, pages=1)
 
 
 @pytest.mark.asyncio
 async def test_participants_are_direct_replies_once_each_including_hidden_ones(repository: DatabaseRepository) -> None:
     service = EngagementService(repository, RaffleTwitter(retweeters=[], retweet_count=0))
     out = await service.raffle_participants(url="https://x.com/major/status/100", exclude=["proj"])
-    assert [p["handle"] for p in out["participants"]] == ["ana", "ben", "eve"]
+    assert [p["handle"] for p in out["participants"]] == ["ana", "ben", "eve", "fay"]
     assert out["participants"][0]["reply"] == "done", "the first reply is the one kept"
     assert out["found_only_by_search"] == 2
-    assert out["breakdown"] == {"from_list": 1, "only_by_search": 2, "second_replies": 1, "left_out": 1, "nested": 1}
+    assert out["breakdown"] == {"from_list": 2, "only_by_search": 2, "second_replies": 1, "left_out": 1, "nested": 1}
+    report = {row["source"]: row for row in out["sources"]}
+    assert [row["source"] for row in out["sources"]] == ["thread_latest", "thread_top", "reply_list", "conversation", "to_author"]
+    assert report["thread_latest"]["new"] == 2 and report["thread_top"]["new"] == 0
+    assert report["conversation"]["new"] == 1 and report["to_author"]["new"] == 1
+
+
+@pytest.mark.asyncio
+async def test_participants_survive_a_failing_source(repository: DatabaseRepository) -> None:
+    service = EngagementService(repository, RaffleTwitter(retweeters=[], retweet_count=0, thread_fails=True))
+    out = await service.raffle_participants(url="https://x.com/major/status/100", exclude=[])
+    assert [p["handle"] for p in out["participants"]] == ["ana", "ben", "eve"]
+    report = {row["source"]: row for row in out["sources"]}
+    assert "Bad gateway" in report["thread_latest"]["error"] and report["thread_latest"]["complete"] is False
+    assert out["complete"] is True, "the sources that answered were read to the end"
+
+
+@pytest.mark.asyncio
+async def test_two_posts_to_retweet_must_both_be_retweeted(repository: DatabaseRepository) -> None:
+    twitter = RaffleTwitter(retweeters=[], retweet_count=2, by_post={"100": ["ana", "ben"], "200": ["ana", "cy"]})
+    service = EngagementService(repository, twitter)
+    out = await service.check_handles_follow(
+        handles=["ana", "ben"], accounts=["major", "proj"], actor_discord_id="1",
+        retweet_urls=["https://x.com/major/status/100", "https://x.com/proj/status/200", "https://x.com/major/status/100"],
+    )
+    assert [post["tweet_id"] for post in out["retweet_posts"]] == ["100", "200"], "duplicates read once"
+    rows = {row["handle"]: row for row in out["rows"]}
+    assert rows["ana"]["retweets"] == {"100": True, "200": True} and rows["ana"]["verdict"] == "passes"
+    assert rows["ben"]["retweets"] == {"100": True, "200": False}
+    assert rows["ben"]["retweeted"] is False and rows["ben"]["verdict"] == "missing"
 
 
 @pytest.mark.asyncio
